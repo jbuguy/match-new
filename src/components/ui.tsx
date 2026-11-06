@@ -1,7 +1,6 @@
 import {
   createContext,
   createElement,
-  createPortal,
   useContext,
   useEffect,
   useId,
@@ -10,10 +9,11 @@ import {
   type ButtonHTMLAttributes,
   type HTMLAttributes,
   type InputHTMLAttributes,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type SelectHTMLAttributes,
 } from "react";
+import { createPortal } from "react-dom";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost" | "light";
@@ -131,16 +131,20 @@ export function Input({
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const messageId = `${inputId}-message`;
+  const labelId = `${inputId}-label`;
   const message = error ?? hint;
 
   return (
-    <label className="form-field" htmlFor={inputId}>
-      <span className="form-field__label">{label}</span>
+    <div className="form-field">
+      <label className="form-field__label" id={labelId} htmlFor={inputId}>
+        {label}
+      </label>
       <input
         id={inputId}
         className={`input ${error ? "input--error" : ""}`.trim()}
         aria-invalid={Boolean(error) || undefined}
         aria-describedby={message ? messageId : undefined}
+        aria-labelledby={labelId}
         {...props}
       />
       {message && (
@@ -151,7 +155,7 @@ export function Input({
           {message}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 
@@ -169,14 +173,18 @@ export function Select({
   const generatedId = useId();
   const selectId = id ?? generatedId;
   const hintId = `${selectId}-hint`;
+  const labelId = `${selectId}-label`;
 
   return (
-    <label className="form-field" htmlFor={selectId}>
-      <span className="form-field__label">{label}</span>
+    <div className="form-field">
+      <label className="form-field__label" id={labelId} htmlFor={selectId}>
+        {label}
+      </label>
       <select
         id={selectId}
         className="select"
         aria-describedby={hint ? hintId : undefined}
+        aria-labelledby={labelId}
         {...props}
       >
         {options.map((option) => (
@@ -190,7 +198,7 @@ export function Select({
           {hint}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 
@@ -225,9 +233,10 @@ export function EmptyState({
   description: string;
   action?: ReactNode;
 }) {
+  const titleId = useId();
   return (
-    <div className="empty-state" role="status">
-      <h3>{title}</h3>
+    <div className="empty-state" role="status" aria-labelledby={titleId}>
+      <h3 id={titleId}>{title}</h3>
       <p>{description}</p>
       {action}
     </div>
@@ -296,7 +305,7 @@ export function Tabs({
   const baseId = useId();
   const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0];
 
-  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | undefined;
     if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
     if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
@@ -353,7 +362,12 @@ function getFocusableElements(container: HTMLElement) {
     container.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((element) => element.offsetParent !== null || element === document.activeElement);
+  ).filter(
+    (element) =>
+      !element.closest("[hidden], [aria-hidden='true']") &&
+      getComputedStyle(element).display !== "none" &&
+      getComputedStyle(element).visibility !== "hidden",
+  );
 }
 
 export function Modal({
@@ -383,7 +397,7 @@ export function Modal({
     const focusable = dialog ? getFocusableElements(dialog) : [];
     (focusable[0] ?? dialog)?.focus();
 
-    function onKeyDown(event: KeyboardEvent) {
+    function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
         onCloseRef.current();
         return;

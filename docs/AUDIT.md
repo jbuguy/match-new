@@ -25,7 +25,7 @@ backend currently exposes only liveness and does not yet connect to a database.
 | Matching weights (50/20/15/15) and tests | Missing | None |
 | Skill/occupation referentials and skill relations | Missing | None |
 | Seeds, ingestion, workers, scheduled jobs | Missing | None |
-| UI framework and styling | Started: React, Vite, TypeScript, responsive CSS tokens, light/dark mode | `src/`, `package.json`, `vite.config.ts` |
+| UI framework and styling | Started: React, Vite, TypeScript, responsive CSS tokens, light/dark mode, reusable primitives | `src/`, `package.json`, `vite.config.ts` |
 | API framework | Started: FastAPI liveness endpoint | `backend/app/main.py` |
 | Test suite and baseline | No pre-existing suite; initial checks added with implementation | `src/App.test.tsx`, `backend/tests/` |
 
@@ -48,7 +48,7 @@ scaffolds should be treated as available.
 ## Test baseline
 
 There was no pre-existing code or test suite to run. The initial implementation
-checks passed: frontend build; 3 frontend tests; 1 API test; and `npm audit`
+checks passed: frontend build; 12 frontend tests; 1 API test; and `npm audit`
 with zero reported vulnerabilities. No database or product-feature tests
 exist yet.
 

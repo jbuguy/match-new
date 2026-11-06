@@ -13,11 +13,14 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
   shell.
   - [x] Choose the brief's stack: React/Vite/TypeScript, FastAPI, PostgreSQL.
   - [x] Implement design tokens, light/dark theme switching, and reusable
-    Button, Card, Badge, and ProgressBar primitives.
+    buttons, cards, badges, chips, avatars, form inputs and selects, tabs,
+    modal, drawer, toast, stepper, progress, skeleton, empty state, data table,
+    and chart frame.
   - [x] Implement candidate app shell and French-first empty states.
   - [x] Verify app navigation and no horizontal overflow at 360 px and
     1280 px; verify theme toggle.
-  - [ ] Complete the full shared component catalog from the brief.
+  - [x] Test component keyboard behavior, modal focus trapping, and accessible
+    labels/announcements.
 
 ## Build order
 
@@ -36,9 +39,12 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
   replaced.
 - Features not implemented are unavailable; the initial UI uses empty states
   rather than simulated platform data.
-- Latest checks: frontend build passed; frontend tests passed (3); API tests
+- Latest checks: frontend build passed; frontend tests passed (12); API tests
   passed (1); `npm audit` reported zero vulnerabilities.
 - No PostgreSQL integration, authentication, matching, or product data exists
   yet. API liveness is process-only.
+- GitHub PR is not yet possible: this local git repository has no commits or
+  remote. User requested PR and merge; destination remote/base branch are
+  required before publication.
 - Continue from this file and the audit. Review only files relevant to the
   current milestone; update the ledger after verification.
