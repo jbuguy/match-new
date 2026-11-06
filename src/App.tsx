@@ -1,35 +1,193 @@
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowUpRight,
+  BarChart3,
   BriefcaseBusiness,
+  Building2,
   ChevronDown,
+  ClipboardList,
   Compass,
+  Database,
   GraduationCap,
   LayoutDashboard,
+  ListChecks,
+  LogOut,
   Menu,
   MessageCircle,
   Moon,
+  Settings2,
   Sparkles,
   Sun,
+  Upload,
   UserRound,
   X,
 } from "lucide-react";
 import { Badge, Button, Card, ProgressBar } from "./components/ui";
+import {
+  ApiError,
+  demoAccounts,
+  fetchCurrentUser,
+  login,
+  type AuthUser,
+  type Role,
+} from "./auth";
 
-const navigation = [
-  { label: "Vue d’ensemble", icon: LayoutDashboard },
-  { label: "Mes opportunités", icon: BriefcaseBusiness },
-  { label: "Mon parcours", icon: Compass },
-  { label: "Formations", icon: GraduationCap },
-  { label: "Assistant", icon: MessageCircle },
-  { label: "Mon profil", icon: UserRound },
-];
+const roleConfiguration: Record<
+  Role,
+  {
+    label: string;
+    navigation: { label: string; icon: typeof LayoutDashboard }[];
+    dashboardTitle: string;
+    dashboardDescription: string;
+  }
+> = {
+  candidate: {
+    label: "Candidat",
+    navigation: [
+      { label: "Vue d’ensemble", icon: LayoutDashboard },
+      { label: "Mes opportunités", icon: BriefcaseBusiness },
+      { label: "Mon parcours", icon: Compass },
+      { label: "Formations", icon: GraduationCap },
+      { label: "Assistant", icon: MessageCircle },
+      { label: "Mon profil", icon: UserRound },
+    ],
+    dashboardTitle: "Votre espace candidat",
+    dashboardDescription: "Vos compétences ouvrent des portes vers des emplois et des formations.",
+  },
+  employer: {
+    label: "Employeur",
+    navigation: [
+      { label: "Vue d’ensemble", icon: LayoutDashboard },
+      { label: "Mes offres", icon: BriefcaseBusiness },
+      { label: "Candidatures", icon: UserRound },
+      { label: "Mon organisation", icon: Building2 },
+    ],
+    dashboardTitle: "Votre espace employeur",
+    dashboardDescription: "Gérez les offres de votre organisation et suivez les candidatures reçues.",
+  },
+  ministry_admin: {
+    label: "Administration",
+    navigation: [
+      { label: "Vue d’ensemble", icon: LayoutDashboard },
+      { label: "Référentiels", icon: Database },
+      { label: "Suggestions", icon: ListChecks },
+      { label: "Importations", icon: Upload },
+      { label: "Indicateurs agrégés", icon: BarChart3 },
+    ],
+    dashboardTitle: "Espace administration",
+    dashboardDescription: "Gérez les référentiels et consultez les indicateurs agrégés de la plateforme.",
+  },
+  training_provider: {
+    label: "Organisme de formation",
+    navigation: [
+      { label: "Vue d’ensemble", icon: LayoutDashboard },
+      { label: "Catalogue de formations", icon: GraduationCap },
+      { label: "Mon organisation", icon: Building2 },
+    ],
+    dashboardTitle: "Espace organisme de formation",
+    dashboardDescription: "Gérez votre catalogue de formations liées aux compétences validées.",
+  },
+  operator: {
+    label: "Opérations",
+    navigation: [
+      { label: "Vue d’ensemble", icon: LayoutDashboard },
+      { label: "Services", icon: Settings2 },
+      { label: "Journaux d’audit", icon: ClipboardList },
+    ],
+    dashboardTitle: "Espace opérations",
+    dashboardDescription: "Suivez les services et journaux sans accéder aux données personnelles.",
+  },
+};
 
 export default function App() {
   const [activePage, setActivePage] = useState("Vue d’ensemble");
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [accessToken, setAccessToken] = useState<string | null>(() =>
+    sessionStorage.getItem("mahara-match-token"),
+  );
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(Boolean(accessToken));
+  const [authError, setAuthError] = useState("");
   const isDashboard = activePage === "Vue d’ensemble";
+
+  useEffect(() => {
+    if (!accessToken) {
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    fetchCurrentUser(accessToken)
+      .then((authenticatedUser) => {
+        if (!cancelled) {
+          setUser(authenticatedUser);
+          setActivePage(roleConfiguration[authenticatedUser.role].navigation[0].label);
+          setIsLoading(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 401) {
+          sessionStorage.removeItem("mahara-match-token");
+          setAccessToken(null);
+        }
+        setAuthError(error instanceof Error ? error.message : "La connexion a échoué.");
+        setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>, email: string, password: string) {
+    event.preventDefault();
+    setAuthError("");
+    try {
+      const result = await login(email, password);
+      sessionStorage.setItem("mahara-match-token", result.access_token);
+      setAccessToken(result.access_token);
+      setUser(result.user);
+      setActivePage(roleConfiguration[result.user.role].navigation[0].label);
+    } catch (error: unknown) {
+      setAuthError(error instanceof Error ? error.message : "La connexion a échoué.");
+    }
+  }
+
+  function handleLogout() {
+    sessionStorage.removeItem("mahara-match-token");
+    setAccessToken(null);
+    setUser(null);
+    setAuthError("");
+    setActivePage("Vue d’ensemble");
+  }
+
+  if (isLoading) {
+    return (
+      <div className="app-shell" data-theme={theme}>
+        <main className="auth-page" aria-live="polite">
+          <p>Vérification de votre session…</p>
+        </main>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="app-shell" data-theme={theme}>
+        <LoginPage
+          error={authError}
+          theme={theme}
+          onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
+          onLogin={handleLogin}
+        />
+      </div>
+    );
+  }
+
+  const configuration = roleConfiguration[user.role];
+  const isCandidate = user.role === "candidate";
 
   return (
     <div className="app-shell" data-theme={theme}>
@@ -58,9 +216,9 @@ export default function App() {
           </button>
         </div>
 
-        <div className="sidebar__label">ESPACE CANDIDAT</div>
+        <div className="sidebar__label">ESPACE {configuration.label.toLocaleUpperCase("fr-FR")}</div>
         <nav className="nav-list" aria-label="Navigation principale">
-          {navigation.map(({ label, icon: Icon }) => (
+          {configuration.navigation.map(({ label, icon: Icon }) => (
             <button
               className={`nav-item ${activePage === label ? "nav-item--active" : ""}`}
               key={label}
@@ -73,33 +231,37 @@ export default function App() {
             >
               <Icon size={19} strokeWidth={1.8} aria-hidden="true" />
               <span>{label}</span>
-              {label === "Assistant" && <span className="nav-item__new">Nouveau</span>}
+              {isCandidate && label === "Assistant" && (
+                <span className="nav-item__new">Nouveau</span>
+              )}
             </button>
           ))}
         </nav>
 
-        <Card className="sidebar-tip">
-          <span className="sidebar-tip__icon">
-            <Sparkles size={17} aria-hidden="true" />
-          </span>
-          <strong>Vos compétences ouvrent des portes.</strong>
-          <p>Complétez votre profil pour découvrir les prochaines étapes.</p>
-          <Button
-            variant="secondary"
-            className="sidebar-tip__button"
-            onClick={() => setActivePage("Mon profil")}
-          >
-            Compléter mon profil <ArrowUpRight size={15} aria-hidden="true" />
-          </Button>
-        </Card>
+        {isCandidate && (
+          <Card className="sidebar-tip">
+            <span className="sidebar-tip__icon">
+              <Sparkles size={17} aria-hidden="true" />
+            </span>
+            <strong>Vos compétences ouvrent des portes.</strong>
+            <p>Complétez votre profil pour découvrir les prochaines étapes.</p>
+            <Button
+              variant="secondary"
+              className="sidebar-tip__button"
+              onClick={() => setActivePage("Mon profil")}
+            >
+              Compléter mon profil <ArrowUpRight size={15} aria-hidden="true" />
+            </Button>
+          </Card>
+        )}
 
         <div className="account-switcher">
           <span className="avatar" aria-hidden="true">
-            C
+            {configuration.label.slice(0, 1)}
           </span>
           <span className="account-switcher__text">
-            <strong>Mon espace</strong>
-            <small>Candidat</small>
+            <strong>{user.email}</strong>
+            <small>{configuration.label}</small>
           </span>
           <ChevronDown size={16} aria-hidden="true" />
         </div>
@@ -140,15 +302,26 @@ export default function App() {
             </button>
             <span className="topbar__divider" />
             <span className="avatar avatar--small" aria-hidden="true">
-              C
+              {configuration.label.slice(0, 1)}
             </span>
-            <span className="topbar__account">Mon compte</span>
+            <span className="topbar__account">{configuration.label}</span>
+            <button className="icon-button" type="button" aria-label="Se déconnecter" onClick={handleLogout}>
+              <LogOut size={18} />
+            </button>
           </div>
         </header>
 
         <div className="page-content">
           {isDashboard ? (
-            <Dashboard onNavigate={setActivePage} />
+            isCandidate ? (
+              <Dashboard onNavigate={setActivePage} />
+            ) : (
+              <RoleDashboard
+                title={configuration.dashboardTitle}
+                description={configuration.dashboardDescription}
+                role={configuration.label}
+              />
+            )
           ) : (
             <section className="page-placeholder">
               <Badge>En préparation</Badge>
@@ -166,6 +339,113 @@ export default function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+function LoginPage({
+  error,
+  theme,
+  onToggleTheme,
+  onLogin,
+}: {
+  error: string;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  onLogin: (event: FormEvent<HTMLFormElement>, email: string, password: string) => Promise<void>;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  return (
+    <main className="auth-page">
+      <div className="auth-toolbar">
+        <a className="brand" href="#accueil" aria-label="Mahara Match, accueil">
+          <span className="brand__mark" aria-hidden="true">m</span>
+          <span className="brand__name">mahara<span>match</span></span>
+        </a>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label={theme === "light" ? "Activer le thème sombre" : "Activer le thème clair"}
+          onClick={onToggleTheme}
+        >
+          {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+        </button>
+      </div>
+      <section className="auth-card" aria-labelledby="login-title">
+        <Badge tone="accent">Mahara Match</Badge>
+        <h1 id="login-title">Connectez-vous à votre espace</h1>
+        <p>Chaque compte accède uniquement aux fonctions de son rôle.</p>
+        <form
+          className="auth-form"
+          onSubmit={(event) => void onLogin(event, email, password)}
+        >
+          <label>
+            <span>Adresse e-mail</span>
+            <input
+              autoComplete="username"
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Mot de passe</span>
+            <input
+              autoComplete="current-password"
+              type="password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <Button type="submit" className="auth-submit">Se connecter</Button>
+        </form>
+        <div className="demo-account-list">
+          <strong>Comptes de démonstration</strong>
+          <p>Choisissez un compte pour remplir son adresse e-mail. Le mot de passe est fourni lors du seed local.</p>
+          <div className="demo-account-list__buttons">
+            {demoAccounts.map((account) => (
+              <button
+                key={account.role}
+                type="button"
+                onClick={() => setEmail(account.email)}
+              >
+                {account.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function RoleDashboard({
+  title,
+  description,
+  role,
+}: {
+  title: string;
+  description: string;
+  role: string;
+}) {
+  return (
+    <section className="role-dashboard">
+      <div className="eyebrow">{role.toLocaleUpperCase("fr-FR")}</div>
+      <h1>{title}</h1>
+      <p className="role-dashboard__description">{description}</p>
+      <Card className="role-dashboard__empty">
+        <Badge>En préparation</Badge>
+        <h2>Votre espace est prêt à être configuré</h2>
+        <p>
+          Les fonctions de ce rôle ne sont pas encore disponibles. Aucune offre,
+          candidature, formation ou statistique n’est simulée.
+        </p>
+      </Card>
+    </section>
   );
 }
 

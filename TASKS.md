@@ -9,7 +9,7 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
 ## Current focus
 
 - [x] Task 0 — Fresh-project baseline audit (`docs/AUDIT.md`).
-- [/] Task 6, part 1 — Design tokens, shared components, and responsive app
+- [x] Task 6, part 1 — Design tokens, shared components, and responsive app
   shell.
   - [x] Choose the brief's stack: React/Vite/TypeScript, FastAPI, PostgreSQL.
   - [x] Implement design tokens, light/dark theme switching, and reusable
@@ -21,10 +21,19 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
     1280 px; verify theme toggle.
   - [x] Test component keyboard behavior, modal focus trapping, and accessible
     labels/announcements.
+- [x] Task 1 — Roles, access control, demo users, and audit log.
+  - [x] Define five app-specific roles and server-side permission boundaries.
+  - [x] Add PostgreSQL users, organisations, memberships, and migration.
+  - [x] Add password-hashed demo users and JWT login/current-user endpoints.
+  - [x] Add role and ownership/organisation membership guards.
+  - [x] Add append-only audit events and an operator view without personal data.
+  - [x] Add role-specific login, dashboard, and navigation in the frontend.
+  - [x] Test all roles on the current protected routes, login, ownership,
+    migration append-only behavior, and frontend role navigation.
 
 ## Build order
 
-- [ ] Task 1 — Roles, access control, demo users, and audit log.
+- [x] Task 1 — Roles, access control, demo users, and audit log.
 - [ ] Task 5 — Reproducible synthetic data generator.
 - [ ] Task 3 — Authorised data collection and ingestion pipeline.
 - [ ] Task 2 — Derja chatbot, manual fallback, and session history.
@@ -39,10 +48,14 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
   replaced.
 - Features not implemented are unavailable; the initial UI uses empty states
   rather than simulated platform data.
-- Latest checks: frontend build passed; frontend tests passed (12); API tests
-  passed (1); `npm audit` reported zero vulnerabilities.
-- No PostgreSQL integration, authentication, matching, or product data exists
-  yet. API liveness is process-only.
+- Latest checks: frontend build passed; frontend tests passed (18); API tests
+  passed (29); PostgreSQL migration SQL generation passed.
+- PostgreSQL-backed authentication and role infrastructure are implemented.
+  Product data routes (profiles, offers, applications, courses, chat, roadmaps)
+  are still unavailable; the reusable owner and organisation guards must be
+  applied as those routes are built.
+- API liveness is process-only; it intentionally does not imply database
+  readiness.
 - GitHub PR is not yet possible: this local git repository has no commits or
   remote. User requested PR and merge; destination remote/base branch are
   required before publication.
