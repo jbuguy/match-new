@@ -33,6 +33,9 @@ DEMO_ACCOUNTS: tuple[tuple[str, Role, str | None, OrganisationType | None], ...]
 )
 
 
+DEMO_ACCOUNT_ROLES = {email: role for email, role, _, _ in DEMO_ACCOUNTS}
+
+
 def seed_demo_users(session: Session, password: str) -> None:
     if len(password) < 12:
         raise ValueError("The demo password must be at least 12 characters.")
@@ -44,7 +47,10 @@ def seed_demo_users(session: Session, password: str) -> None:
             session.add(user)
             session.flush()
         elif user.role != role:
-            raise ValueError(f"The existing demo account {email} has an unexpected role.")
+            if DEMO_ACCOUNT_ROLES.get(email) == role:
+                user.role = role
+            else:
+                raise ValueError(f"The existing demo account {email} has an unexpected role.")
 
         if organisation_name is None or organisation_type is None:
             continue

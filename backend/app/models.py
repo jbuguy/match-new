@@ -59,6 +59,23 @@ class CourseEnrollmentStatus(str, Enum):
     WITHDRAWN = "withdrawn"
 
 
+class TechnicalAssessmentStatus(str, Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class BehavioralAssessmentStatus(str, Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class InterviewTranscriptionStatus(str, Enum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -187,6 +204,193 @@ class CandidateAssistantSession(Base):
     )
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     messages: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class CandidateTechnicalAssessment(Base):
+    __tablename__ = "candidate_technical_assessments"
+    __table_args__ = (
+        Index(
+            "ix_candidate_technical_assessments_candidate_created",
+            "candidate_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    job_offer_id: Mapped[str] = mapped_column(
+        ForeignKey("job_offers.id", ondelete="CASCADE"), nullable=False
+    )
+    skill: Mapped[str] = mapped_column(String(60), nullable=False)
+    questions: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    status: Mapped[TechnicalAssessmentStatus] = mapped_column(
+        SqlEnum(
+            TechnicalAssessmentStatus,
+            name="technical_assessment_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda values: [member.value for member in values],
+        ),
+        default=TechnicalAssessmentStatus.IN_PROGRESS,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class CandidateTechnicalAssessmentAnswer(Base):
+    __tablename__ = "candidate_technical_assessment_answers"
+    __table_args__ = (
+        UniqueConstraint(
+            "assessment_id",
+            "question_id",
+            name="uq_technical_assessment_answer_question",
+        ),
+        Index(
+            "ix_candidate_technical_assessment_answers_assessment",
+            "assessment_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("candidate_technical_assessments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    answer: Mapped[str] = mapped_column(String(10000), nullable=False)
+    evaluation: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
+class CandidateBehavioralAssessment(Base):
+    __tablename__ = "candidate_behavioral_assessments"
+    __table_args__ = (
+        Index(
+            "ix_candidate_behavioral_assessments_candidate_created",
+            "candidate_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    job_offer_id: Mapped[str] = mapped_column(
+        ForeignKey("job_offers.id", ondelete="CASCADE"), nullable=False
+    )
+    competency_id: Mapped[str] = mapped_column(String(60), nullable=False)
+    competency_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    questions: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    status: Mapped[BehavioralAssessmentStatus] = mapped_column(
+        SqlEnum(
+            BehavioralAssessmentStatus,
+            name="behavioral_assessment_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda values: [member.value for member in values],
+        ),
+        default=BehavioralAssessmentStatus.IN_PROGRESS,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class CandidateBehavioralAssessmentAnswer(Base):
+    __tablename__ = "candidate_behavioral_assessment_answers"
+    __table_args__ = (
+        UniqueConstraint(
+            "assessment_id",
+            "question_id",
+            name="uq_behavioral_assessment_answer_question",
+        ),
+        Index(
+            "ix_candidate_behavioral_assessment_answers_assessment",
+            "assessment_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    assessment_id: Mapped[str] = mapped_column(
+        ForeignKey("candidate_behavioral_assessments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    answer: Mapped[str] = mapped_column(String(10000), nullable=False)
+    evaluation: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
+class CandidateInterviewTranscription(Base):
+    __tablename__ = "candidate_interview_transcriptions"
+    __table_args__ = (
+        Index(
+            "ix_candidate_interview_transcriptions_candidate_created",
+            "candidate_id",
+            "created_at",
+        ),
+        Index(
+            "ix_candidate_interview_transcriptions_assessment_question",
+            "assessment_type",
+            "assessment_id",
+            "question_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    assessment_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    assessment_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    question_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[InterviewTranscriptionStatus] = mapped_column(
+        SqlEnum(
+            InterviewTranscriptionStatus,
+            name="interview_transcription_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda values: [member.value for member in values],
+        ),
+        default=InterviewTranscriptionStatus.QUEUED,
+        nullable=False,
+    )
+    transcript: Mapped[str | None] = mapped_column(String(10000), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

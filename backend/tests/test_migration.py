@@ -28,6 +28,11 @@ def test_sqlite_migration_enforces_append_only_audit_log(
         "job_applications",
         "training_courses",
         "course_enrollments",
+        "candidate_technical_assessments",
+        "candidate_technical_assessment_answers",
+        "candidate_behavioral_assessments",
+        "candidate_behavioral_assessment_answers",
+        "candidate_interview_transcriptions",
     } <= tables
     profile_columns = {column["name"] for column in inspect(engine).get_columns("candidate_profiles")}
     assert {

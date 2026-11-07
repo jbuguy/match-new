@@ -14,8 +14,19 @@ matching, employer job offers, and role-specific guided assistants are also
 available. Candidates can also chat about careers in Derja, Arabic, or French
 and return to their saved assistant conversations. Their career roadmaps
 prioritize missing skills requested by published offers and save candidate-owned
-step progress. Candidates can apply to offers and enroll in published
-formations. Employers can review applications and record hiring outcomes.
+step progress. Candidates can prepare for interviews using employer-published
+offer requirements and clearly labeled general behavioral and communication
+prompts, and complete saved, role-linked technical assessments with
+deterministic knowledge scoring and structured feedback for text responses.
+They can also record technical or behavioral answers in the browser, review and
+edit Whisper transcripts before submitting them, or use manual text entry.
+Candidate code submissions are never executed. Candidates can also review a
+lightweight communication coach that analyzes a draft answer for structure,
+concrete examples, and result clarity and surfaces micro-exercises to improve
+it. The interview-prep workspace now also shows a progress report summarizing
+completed questions, score averages, and recommendations for the next round of
+practice. Candidates can apply to offers and enroll in published formations.
+Employers can review applications and record hiring outcomes.
 Training providers can manage courses and follow enrollments and completions.
 The ministry administration dashboard reports filtered platform activity and
 aggregate outcomes without exposing candidate-level records.
@@ -43,6 +54,23 @@ python -m pip install -r backend/requirements.txt
 python -m alembic -c backend/alembic.ini upgrade head
 $env:PYTHONPATH = "backend"
 python -m app.seed_demo_users
+```
+
+To reset the local development database without dropping the schema or migration
+history, use the explicit opt-in reset script:
+
+```powershell
+$env:PYTHONPATH = "backend"
+$env:DATABASE_URL = "postgresql+psycopg://postgres:password@localhost:5432/mahara_match"
+python -m scripts.reset_demo_database --confirm
+```
+
+To rebuild a realistic demo dataset with stable candidate and employer records,
+matching offers, and published training content:
+
+```powershell
+$env:PYTHONPATH = "backend"
+python -m scripts.seed_demo_data
 ```
 
 Demo account emails:
@@ -80,9 +108,45 @@ their full profile at `/candidate/profile`, chat with the profile assistant at
 `POST /candidate/assistant/speech`. Career assistant sessions can be listed,
 created, read, and deleted at `/candidate/assistant/sessions`; send a message
 to a session at `POST /candidate/assistant/sessions/{session_id}/messages`.
-Candidates can read offer matches at `GET /candidate/matches`. Employers can
-publish offers at `POST /employer/offers` and list their own offers at
-`GET /employer/offers`. Candidates submit and view applications at
+Candidates can read offer matches at `GET /candidate/matches` and list
+interview-preparation targets at `GET /candidate/interview-prep/roles`. Read an
+offer-based competency profile at
+`GET /candidate/interview-prep/profiles/{offer_id}`. Requirements come from
+that employer offer; generic behavioral prompts are suggestions and do not
+assert employer requirements. Start a technical assessment for an offer skill
+with `POST /candidate/interview-prep/assessments`, read the candidate-owned
+session at `GET /candidate/interview-prep/assessments/{assessment_id}`, and
+submit answers at
+`POST /candidate/interview-prep/assessments/{assessment_id}/answers`. Objective
+Python and SQL knowledge questions are scored deterministically; open answers
+are evaluated by the configured local assistant and saved with criterion
+scores and feedback. Text exercises are not executed. Open-answer assessment
+requires `MAHARA_LLM_BASE_URL` to be configured. Start a behavioral and
+situational assessment for a supported general competency at
+`POST /candidate/interview-prep/behavioral-assessments`, read the
+candidate-owned session at
+`GET /candidate/interview-prep/behavioral-assessments/{assessment_id}`, and
+submit a text answer at
+`POST /candidate/interview-prep/behavioral-assessments/{assessment_id}/answers`.
+Behavioral feedback includes structured Situation, Task, Action, and Result
+scores; situational responses are evaluated without claiming to measure
+personality. These are general coaching suggestions, not employer requirements.
+Candidates can upload an interview answer for transcription at
+`POST /candidate/interview-prep/{assessment_type}-assessments/{assessment_id}/questions/{question_id}/transcription`
+and poll its status at
+`GET /candidate/interview-prep/transcriptions/{transcription_id}`. Uploads
+require an `audio/*` media type and are limited to 20 MB. The backend processes
+audio asynchronously through the configured Whisper service, stores the
+transcript and job status, and does not retain raw audio. Transcripts are
+suggestions: candidates can edit them, and they are not submitted until the
+candidate uses the normal assessment answer form. Manual text entry remains
+available when browser recording or the transcription service is unavailable.
+The `{assessment_type}` path value is `technical` or `behavioral`. Jobs use
+FastAPI's in-process background tasks, so a process restart before processing
+finishes can leave a job queued; the candidate can retry the recording.
+Employers can publish offers at `POST /employer/offers` and list their own
+offers at `GET /employer/offers`.
+Candidates submit and view applications at
 `POST /candidate/applications/{offer_id}` and `GET /candidate/applications`;
 employers review their offer applications at `GET /employer/applications` and
 update status at `PUT /employer/applications/{application_id}/status`.

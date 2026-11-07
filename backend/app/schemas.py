@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 import re
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -409,3 +410,197 @@ class CandidateRoadmapStepUpdate(BaseModel):
         if not clean:
             raise ValueError("Skill cannot be blank.")
         return clean
+
+
+class CandidateInterviewRoleResponse(BaseModel):
+    id: str
+    title: str
+    description: str
+    location: str
+    required_skills: list[str]
+
+
+class InterviewCompetencyResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    category: str
+    associated_skill: str | None
+    assessment_criteria: list[str]
+    required_proficiency_level: int | None
+    importance_weight: float | None
+    mandatory: bool
+    source: str
+    candidate_evidence: str
+
+
+class InterviewProficiencyLevelResponse(BaseModel):
+    level: int
+    name: str
+    description: str
+
+
+class CandidateInterviewPreparationProfileResponse(BaseModel):
+    role: CandidateInterviewRoleResponse
+    required_competencies: list[InterviewCompetencyResponse]
+    suggested_competencies: list[InterviewCompetencyResponse]
+    proficiency_levels: list[InterviewProficiencyLevelResponse]
+
+
+class TechnicalAssessmentStartRequest(BaseModel):
+    offer_id: str = Field(min_length=1, max_length=36)
+    skill: str = Field(min_length=1, max_length=60)
+
+    @field_validator("offer_id", "skill")
+    @classmethod
+    def trim_assessment_target(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("An offer and skill are required.")
+        return clean
+
+
+class TechnicalAssessmentAnswerRequest(BaseModel):
+    question_id: str = Field(min_length=1, max_length=20)
+    answer: str | None = Field(default=None, max_length=10000)
+    selected_option_id: str | None = Field(default=None, max_length=20)
+
+    @field_validator("answer")
+    @classmethod
+    def trim_assessment_answer(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        return clean or None
+
+    @field_validator("selected_option_id")
+    @classmethod
+    def trim_option_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        return clean or None
+
+    @model_validator(mode="after")
+    def require_one_answer_format(self) -> "TechnicalAssessmentAnswerRequest":
+        if (self.answer is None) == (self.selected_option_id is None):
+            raise ValueError("Provide either a text answer or one selected option.")
+        return self
+
+
+class TechnicalAssessmentOptionResponse(BaseModel):
+    id: str
+    label: str
+
+
+class TechnicalAssessmentCriterionResponse(BaseModel):
+    id: str
+    label: str
+
+
+class TechnicalAssessmentQuestionResponse(BaseModel):
+    id: str
+    type: Literal["knowledge", "practical", "scenario"]
+    format: Literal["multiple_choice", "short_answer", "text_exercise"]
+    skill: str
+    prompt: str
+    options: list[TechnicalAssessmentOptionResponse] = Field(default_factory=list)
+    criteria: list[TechnicalAssessmentCriterionResponse] = Field(default_factory=list)
+
+
+class TechnicalAssessmentCriterionScoreResponse(BaseModel):
+    criterion_id: str
+    label: str
+    score: int
+    max_score: int
+
+
+class TechnicalAssessmentEvaluationResponse(BaseModel):
+    score: int
+    max_score: int
+    criteria_scores: list[TechnicalAssessmentCriterionScoreResponse]
+    explanation: str
+    strengths: list[str]
+    weaknesses: list[str]
+    suggested_improvements: list[str]
+    method: Literal["deterministic", "llm"]
+
+
+class TechnicalAssessmentAnswerResponse(BaseModel):
+    question_id: str
+    answer: str
+    evaluation: TechnicalAssessmentEvaluationResponse
+    created_at: datetime
+
+
+class CandidateTechnicalAssessmentResponse(BaseModel):
+    id: str
+    offer_id: str
+    offer_title: str
+    skill: str
+    status: Literal["in_progress", "completed"]
+    questions: list[TechnicalAssessmentQuestionResponse]
+    answers: list[TechnicalAssessmentAnswerResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class BehavioralAssessmentQuestionResponse(BaseModel):
+    id: str
+    type: Literal["behavioral", "situational"]
+    format: Literal["star_text", "text_answer"]
+    competency_id: str
+    competency_name: str
+    prompt: str
+    criteria: list[TechnicalAssessmentCriterionResponse]
+    star_components: list[TechnicalAssessmentCriterionResponse]
+
+
+class BehavioralSTARScoreResponse(BaseModel):
+    score: int
+    max_score: int
+    evidence: str
+
+
+class BehavioralAssessmentEvaluationResponse(BaseModel):
+    score: int
+    max_score: int
+    criteria_scores: list[TechnicalAssessmentCriterionScoreResponse]
+    star_scores: dict[str, BehavioralSTARScoreResponse]
+    explanation: str
+    strengths: list[str]
+    weaknesses: list[str]
+    suggested_improvements: list[str]
+    method: Literal["llm"]
+
+
+class BehavioralAssessmentAnswerResponse(BaseModel):
+    question_id: str
+    answer: str
+    evaluation: BehavioralAssessmentEvaluationResponse
+    created_at: datetime
+
+
+class CandidateBehavioralAssessmentResponse(BaseModel):
+    id: str
+    offer_id: str
+    offer_title: str
+    competency_id: str
+    competency_name: str
+    status: Literal["in_progress", "completed"]
+    questions: list[BehavioralAssessmentQuestionResponse]
+    answers: list[BehavioralAssessmentAnswerResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class CandidateInterviewTranscriptionResponse(BaseModel):
+    id: str
+    assessment_type: Literal["technical", "behavioral"]
+    assessment_id: str
+    question_id: str
+    status: Literal["queued", "processing", "completed", "failed"]
+    transcript: str | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime

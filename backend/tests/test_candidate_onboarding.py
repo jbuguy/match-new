@@ -109,6 +109,34 @@ def test_candidate_profile_updates_keep_legacy_skills_and_add_onboarding_fields(
     assert read_back.json()["location"] == "Sfax"
 
 
+def test_candidate_can_upload_cv_and_extract_profile(
+    client: TestClient,
+    users: dict[Role, User],
+) -> None:
+    cv_content = (
+        "Amira Ben Salem\n+216 20 000 000\nTunis\n\n"
+        "Formation: Master en gestion\n\n"
+        "Expérience: 3 ans en support client\n\n"
+        "Compétences: Python, SQL, Excel"
+    )
+    response = client.post(
+        "/candidate/profile/cv",
+        headers=auth_headers(users[Role.CANDIDATE]),
+        files={"file": ("candidate_cv.txt", cv_content.encode("utf-8"), "text/plain")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["full_name"] == "Amira Ben Salem"
+    assert payload["phone"] == "+216 20 000 000"
+    assert payload["location"] == "Tunis"
+    assert payload["education"] == "Master en gestion"
+    assert payload["experience"] == "3 ans en support client"
+    assert "Python" in payload["skills"]
+    assert "SQL" in payload["skills"]
+    assert "Excel" in payload["skills"]
+
+
 def test_candidate_assistant_returns_uncommitted_profile_suggestions(
     client: TestClient,
     users: dict[Role, User],

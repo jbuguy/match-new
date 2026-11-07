@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   BriefcaseBusiness,
   Check,
+  ClipboardCheck,
   Compass,
   MapPin,
   MessagesSquare,
@@ -13,7 +14,7 @@ import {
   Target,
   Trash2,
 } from "lucide-react";
-import { Badge, Button, Card } from "./components/ui";
+import { Badge, Button, Card, Select } from "./components/ui";
 import {
   ApiError,
   applyToJob,
@@ -23,6 +24,14 @@ import {
   fetchCandidateAssistantSession,
   fetchCandidateAssistantSessions,
   fetchCandidateMatches,
+  fetchCandidateInterviewPreparationProfile,
+  fetchCandidateInterviewRoles,
+  startCandidateTechnicalAssessment,
+  startCandidateBehavioralAssessment,
+  fetchCandidateInterviewTranscription,
+  submitCandidateBehavioralAssessmentAnswer,
+  submitCandidateTechnicalAssessmentAnswer,
+  uploadCandidateInterviewAudio,
   fetchCandidateApplications,
   fetchCandidateRoadmap,
   fetchCandidateProfile,
@@ -33,10 +42,16 @@ import {
   transcribeCandidateAudio,
   updateCandidateRoadmapStep,
   updateCandidateProfile,
+  uploadCandidateCv,
   type CandidateAssistantMessage,
   type CandidateProfileDraft,
   type CandidateAssistantSession,
   type CandidateAssistantSessionSummary,
+  type CandidateInterviewPreparationProfile,
+  type CandidateInterviewRole,
+  type CandidateTechnicalAssessment,
+  type CandidateBehavioralAssessment,
+  type TechnicalAssessmentQuestion,
   type CandidateRoadmap,
   type JobMatch,
   type JobOffer,
@@ -53,6 +68,179 @@ function splitSkills(value: string): string[] {
     .split(/[,\n]/)
     .map((skill) => skill.trim())
     .filter(Boolean);
+}
+
+export function summarizeInterviewProgress({
+  technicalAssessment,
+  behavioralAssessment,
+}: {
+  technicalAssessment: CandidateTechnicalAssessment | null;
+  behavioralAssessment: CandidateBehavioralAssessment | null;
+}) {
+  const technicalQuestions = technicalAssessment?.questions.length ?? 0;
+  const behavioralQuestions = behavioralAssessment?.questions.length ?? 0;
+  const technicalAnswers = technicalAssessment?.answers ?? [];
+  const behavioralAnswers = behavioralAssessment?.answers ?? [];
+  const answeredQuestions = technicalAnswers.length + behavioralAnswers.length;
+  const totalQuestions = technicalQuestions + behavioralQuestions;
+  const globalProgress =
+    totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0;
+
+  const technicalAverage =
+    technicalAnswers.length > 0
+      ? Math.round(
+          technicalAnswers.reduce(
+            (sum, answer) => sum + (answer.evaluation.score / answer.evaluation.max_score) * 100,
+            0,
+          ) / technicalAnswers.length,
+        )
+      : 0;
+
+  const behavioralAverage =
+    behavioralAnswers.length > 0
+      ? Math.round(
+          behavioralAnswers.reduce(
+            (sum, answer) => sum + (answer.evaluation.score / answer.evaluation.max_score) * 100,
+            0,
+          ) / behavioralAnswers.length,
+        )
+      : 0;
+
+  const averageScore =
+    answeredQuestions > 0
+      ? Math.round(
+          (technicalAverage * technicalAnswers.length +
+            behavioralAverage * behavioralAnswers.length) /
+            answeredQuestions,
+        )
+      : 0;
+  const completedAssessments = [technicalAssessment, behavioralAssessment].filter(
+    (assessment) => Boolean(assessment && assessment.answers.length > 0),
+  ).length;
+
+  const recommendations: string[] = [];
+  if (globalProgress < 45) {
+    recommendations.push(
+      "Complétez votre première réponse technique ou comportementale pour construire un premier rapport.",
+    );
+  }
+  if (technicalAverage < 70 && technicalAssessment) {
+    recommendations.push(
+      "Reprenez vos réponses techniques en ciblant la structure, l’exemple concret et la vérification du résultat.",
+    );
+  }
+  if (behavioralAverage < 70 && behavioralAssessment) {
+    recommendations.push(
+      "Travaillez la clarté et le résultat dans vos réponses comportementales pour gagner en confiance.",
+    );
+  }
+  if (recommendations.length === 0) {
+    recommendations.push(
+      "Votre préparation est stable. Réservez un dernier exercice pour consolider votre confiance.",
+    );
+  }
+
+  return {
+    totalQuestions,
+    answeredQuestions,
+    globalProgress,
+    technicalAverage,
+    behavioralAverage,
+    averageScore,
+    completedAssessments,
+    recommendations,
+  };
+}
+
+export function analyzeCommunicationSignals(value: string): {
+  score: number;
+  signals: { label: string; detail: string; tone: "good" | "watch" }[];
+  exercises: { title: string; prompt: string }[];
+} {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {
+      score: 0,
+      signals: [
+        { label: "Structure", detail: "Ajoutez une réponse structurée en 3 étapes.", tone: "watch" },
+        { label: "Exemple concret", detail: "Donnez un exemple précis pour illustrer votre point.", tone: "watch" },
+        { label: "Résultat", detail: "Mettez en avant le résultat et la leçon apprise.", tone: "watch" },
+      ],
+      exercises: [
+        { title: "Structure simple", prompt: "Rédigez votre réponse en 3 phrases : contexte, action, résultat." },
+        { title: "Exemple concret", prompt: "Ajoutez un exemple précis tiré de votre travail, étude ou bénévolat." },
+        { title: "Résultat clair", prompt: "Terminez par le résultat et ce que vous avez appris." },
+      ],
+    };
+  }
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const sentenceCount = (trimmed.match(/[.!?]+/g) ?? []).length || 1;
+  const hasStructure = /\b(?:d'abord|ensuite|puis|finalement|premièrement|en premier|donc|par exemple|en résumé)\b/i.test(trimmed);
+  const hasConcreteExample = /\b(?:par exemple|lorsque|quand|dans mon travail|dans un projet|dans l'équipe|dans une situation|exemple)\b/i.test(trimmed);
+  const hasResult = /\b(?:résultat|impact|effet|gain|amélioration|outil|solution|objectif)\b/i.test(trimmed);
+  const hasFirstPerson = /\b(?:je|nous|j'ai|nous avons)\b/i.test(trimmed);
+  const fillerMatches = trimmed.match(/\b(?:euh|hum|basiquement|genre|voilà|en gros|donc)\b/gi) ?? [];
+  const wordCount = words.length;
+
+  let score = 50;
+  if (hasStructure) score += 15;
+  if (hasConcreteExample) score += 15;
+  if (hasResult) score += 10;
+  if (hasFirstPerson) score += 8;
+  if (wordCount >= 30 && wordCount <= 150) score += 10;
+  if (sentenceCount >= 2) score += 5;
+  if (fillerMatches.length > 4) score -= 20;
+  if (wordCount < 18) score -= 10;
+  if (wordCount > 220) score -= 10;
+  score = Math.max(0, Math.min(100, score));
+
+  const signals: { label: string; detail: string; tone: "good" | "watch" }[] = [
+    {
+      label: "Structure",
+      detail: hasStructure
+        ? "Votre réponse suit une logique claire et est facile à suivre."
+        : "Ajoutez une progression simple : contexte, action, résultat.",
+      tone: hasStructure ? "good" : "watch",
+    },
+    {
+      label: "Exemple concret",
+      detail: hasConcreteExample
+        ? "Vous donnez un exemple crédible et précis."
+        : "Illustrez votre réponse avec un exemple concret et identifiable.",
+      tone: hasConcreteExample ? "good" : "watch",
+    },
+    {
+      label: "Résultat",
+      detail: hasResult
+        ? "Votre réponse met en avant le résultat et l’effet."
+        : "Concluez en décrivant le résultat, l’impact ou la leçon.",
+      tone: hasResult ? "good" : "watch",
+    },
+  ];
+
+  const exercises = [
+    {
+      title: "Structure simple",
+      prompt: hasStructure
+        ? "Répétez votre réponse en 3 phrases nettes : situation, action, résultat."
+        : "Rédigez votre réponse en 3 phrases : contexte, action, résultat.",
+    },
+    {
+      title: "Exemple concret",
+      prompt: hasConcreteExample
+        ? "Ajoutez un détail précis qui permet à l’interlocuteur de visualiser la situation."
+        : "Ajoutez un exemple réaliste tiré d’un projet, d’un cours ou d’une expérience de groupe.",
+    },
+    {
+      title: "Résultat clair",
+      prompt: hasResult
+        ? "Terminez par le résultat et ce que vous avez appris."
+        : "Terminez par le résultat, le bénéfice et la leçon que vous en tirez.",
+    },
+  ];
+
+  return { score, signals, exercises };
 }
 
 type CandidateProfileForm = {
@@ -77,6 +265,7 @@ export function CandidateProfilePage({ token }: { token: string }) {
   const [profile, setProfile] = useState(emptyCandidateProfile);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingCv, setIsUploadingCv] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [messages, setMessages] = useState<CandidateAssistantMessage[]>([
@@ -148,6 +337,31 @@ export function CandidateProfilePage({ token }: { token: string }) {
       setError(errorMessage(cause));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleCvUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setIsUploadingCv(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await uploadCandidateCv(token, file);
+      setProfile({
+        full_name: saved.full_name ?? "",
+        phone: saved.phone ?? "",
+        location: saved.location ?? "",
+        education: saved.education ?? "",
+        experience: saved.experience ?? "",
+        skills: saved.skills.join(", "),
+      });
+      setNotice(`Profil extrait depuis ${file.name}. Vérifiez les informations avant d’enregistrer.`);
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setIsUploadingCv(false);
+      event.target.value = "";
     }
   }
 
@@ -321,54 +535,74 @@ export function CandidateProfilePage({ token }: { token: string }) {
                 L’audio n’est pas conservé.
               </p>
             </div>
-            <form className="workspace-form profile-editor" onSubmit={(event) => void saveProfile(event)}>
-              <h2>Vérifiez vos informations</h2>
-              <ProfileTextField
-                label="Nom complet"
-                value={profile.full_name}
-                maxLength={200}
-                onChange={(value) => setProfile({ ...profile, full_name: value })}
-              />
-              <ProfileTextField
-                label="Téléphone"
-                value={profile.phone}
-                maxLength={40}
-                onChange={(value) => setProfile({ ...profile, phone: value })}
-              />
-              <ProfileTextField
-                label="Lieu de résidence"
-                value={profile.location}
-                maxLength={120}
-                onChange={(value) => setProfile({ ...profile, location: value })}
-              />
-              <ProfileTextField
-                label="Études et formations"
-                value={profile.education}
-                maxLength={5000}
-                multiline
-                onChange={(value) => setProfile({ ...profile, education: value })}
-              />
-              <ProfileTextField
-                label="Expérience professionnelle"
-                value={profile.experience}
-                maxLength={5000}
-                multiline
-                onChange={(value) => setProfile({ ...profile, experience: value })}
-              />
-              <ProfileTextField
-                label="Compétences"
-                value={profile.skills}
-                maxLength={2200}
-                multiline
-                hint="Séparez les compétences par des virgules."
-                onChange={(value) => setProfile({ ...profile, skills: value })}
-              />
-              {error && <p className="workspace-error" role="alert">{error}</p>}
-              {notice && <p className="workspace-success" role="status">{notice}</p>}
-              <Button type="submit" disabled={isSaving}>
-                {isSaving ? "Enregistrement…" : "Enregistrer mon profil"}
-              </Button>
-            </form>
+            <div className="workspace-form profile-editor">
+              <div className="profile-upload" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Vérifiez vos informations</h2>
+                  <p style={{ margin: "6px 0 0", color: "#475467" }}>Importez votre CV pour préremplir le profil.</p>
+                </div>
+                <div>
+                  <input
+                    id="candidate-cv-upload"
+                    type="file"
+                    accept=".pdf,.docx,.txt,.md"
+                    hidden
+                    onChange={(event) => void handleCvUpload(event)}
+                  />
+                  <Button type="button" variant="secondary" disabled={isUploadingCv} onClick={() => document.getElementById("candidate-cv-upload")?.click()}>
+                    {isUploadingCv ? "Analyse du CV…" : "Importer un CV"}
+                  </Button>
+                </div>
+              </div>
+              <form onSubmit={(event) => void saveProfile(event)}>
+                <h2>Vérifiez vos informations</h2>
+                <ProfileTextField
+                  label="Nom complet"
+                  value={profile.full_name}
+                  maxLength={200}
+                  onChange={(value) => setProfile({ ...profile, full_name: value })}
+                />
+                <ProfileTextField
+                  label="Téléphone"
+                  value={profile.phone}
+                  maxLength={40}
+                  onChange={(value) => setProfile({ ...profile, phone: value })}
+                />
+                <ProfileTextField
+                  label="Lieu de résidence"
+                  value={profile.location}
+                  maxLength={120}
+                  onChange={(value) => setProfile({ ...profile, location: value })}
+                />
+                <ProfileTextField
+                  label="Études et formations"
+                  value={profile.education}
+                  maxLength={5000}
+                  multiline
+                  onChange={(value) => setProfile({ ...profile, education: value })}
+                />
+                <ProfileTextField
+                  label="Expérience professionnelle"
+                  value={profile.experience}
+                  maxLength={5000}
+                  multiline
+                  onChange={(value) => setProfile({ ...profile, experience: value })}
+                />
+                <ProfileTextField
+                  label="Compétences"
+                  value={profile.skills}
+                  maxLength={2200}
+                  multiline
+                  hint="Séparez les compétences par des virgules."
+                  onChange={(value) => setProfile({ ...profile, skills: value })}
+                />
+                {error && <p className="workspace-error" role="alert">{error}</p>}
+                {notice && <p className="workspace-success" role="status">{notice}</p>}
+                <Button type="submit" disabled={isSaving}>
+                  {isSaving ? "Enregistrement…" : "Enregistrer mon profil"}
+                </Button>
+              </form>
+            </div>
           </>
         )}
       </Card>
@@ -810,6 +1044,967 @@ export function CandidateRoadmapPage({
             <Button onClick={() => onNavigate("Mes opportunités")}>Voir les opportunités</Button>
           </div>
         </Card>
+      )}
+    </section>
+  );
+}
+
+export function CandidateInterviewPreparationPage({
+  token,
+  onNavigate,
+}: {
+  token: string;
+  onNavigate: (page: string) => void;
+}) {
+  const [roles, setRoles] = useState<CandidateInterviewRole[]>([]);
+  const [selectedOfferId, setSelectedOfferId] = useState("");
+  const [preparation, setPreparation] =
+    useState<CandidateInterviewPreparationProfile | null>(null);
+  const [isLoadingRoles, setIsLoadingRoles] = useState(true);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+  const [assessment, setAssessment] = useState<CandidateTechnicalAssessment | null>(null);
+  const [behavioralAssessment, setBehavioralAssessment] =
+    useState<CandidateBehavioralAssessment | null>(null);
+  const mockInterviewPlan = useMemo(() => {
+    if (!preparation) return null;
+
+    const focusSkill =
+      preparation.required_competencies.find(
+        (competency) => competency.candidate_evidence !== "self_reported",
+      ) ??
+      preparation.required_competencies[0] ??
+      preparation.suggested_competencies[0] ??
+      null;
+
+    const coachingFocus =
+      preparation.suggested_competencies.find(
+        (competency) => competency.candidate_evidence === "not_assessed",
+      ) ??
+      preparation.suggested_competencies[0] ??
+      null;
+
+    const technicalQuestion =
+      focusSkill && focusSkill.category === "hard"
+        ? `Présentez votre approche sur ${focusSkill.name} en 2 minutes : contexte, action, résultat.`
+        : "Expliquez une compétence clé de l’offre et montrez comment vous l’avez mise en pratique.";
+
+    const behavioralQuestion =
+      coachingFocus && coachingFocus.category === "communication"
+        ? `Décrivez une situation où vous avez dû expliquer une idée complexe à un collègue ou un manager.`
+        : coachingFocus
+          ? `Parlez d’une situation où ${coachingFocus.name.toLowerCase()} a été crucial pour votre travail.`
+          : "Racontez une situation qui montre votre capacité à travailler avec des personnes et des contraintes variées.";
+
+    const readiness = summarizeInterviewProgress({
+      technicalAssessment: assessment,
+      behavioralAssessment,
+    });
+
+    const priorityLabel = readiness.averageScore >= 70 ? "Très bonne préparation" : "Priorité de travail";
+    const summary = focusSkill
+      ? `Le prochain exercice met l’accent sur ${focusSkill.name}, une compétence demandée par l’offre et encore à renforcer.`
+      : "Vous pouvez renforcer votre confiance avec un exercice ciblé sur votre préparation globale.";
+
+    if (focusSkill && focusSkill.category === "hard") {
+      return {
+        title: "Simulation d’entretien adaptative",
+        priorityLabel,
+        summary,
+        question: technicalQuestion,
+        guidance: [
+          "Parlez de votre contexte en 30 secondes.",
+          "Montrez l’action concrète que vous avez menée.",
+          "Terminez avec le résultat et la leçon apprise.",
+        ],
+        buttonLabel: `Lancer une simulation ${focusSkill.name}`,
+        onStart: () => void beginAssessment(focusSkill.name),
+      };
+    }
+
+    return {
+      title: "Simulation d’entretien adaptative",
+      priorityLabel,
+      summary,
+      question: behavioralQuestion,
+      guidance: [
+        "Donnez un exemple précis tiré d’un projet ou d’une situation réelle.",
+        "Expliquez la difficulté, votre rôle et la décision prise.",
+        "Concluez sur le résultat et ce que vous avez appris.",
+      ],
+      buttonLabel: coachingFocus ? `Lancer une simulation ${coachingFocus.name}` : "Lancer une simulation",
+      onStart: coachingFocus
+        ? () => void beginBehavioralAssessment(coachingFocus.id)
+        : undefined,
+    };
+  }, [assessment, behavioralAssessment, preparation]);
+  const [startingCompetency, setStartingCompetency] = useState("");
+  const [startingSkill, setStartingSkill] = useState("");
+  const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+  const [isSubmittingBehavioralAnswer, setIsSubmittingBehavioralAnswer] = useState(false);
+  const [draftAnswer, setDraftAnswer] = useState("");
+  const [behavioralDraftAnswer, setBehavioralDraftAnswer] = useState("");
+  const [selectedOptionId, setSelectedOptionId] = useState("");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [isRecordingAnswer, setIsRecordingAnswer] = useState(false);
+  const [isTranscribingAnswer, setIsTranscribingAnswer] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const [error, setError] = useState("");
+  const communicationText =
+    voiceTranscript || draftAnswer || behavioralDraftAnswer || "";
+  const communicationSignals = communicationText.trim()
+    ? analyzeCommunicationSignals(communicationText)
+    : null;
+  const progressReport = summarizeInterviewProgress({
+    technicalAssessment: assessment,
+    behavioralAssessment,
+  });
+  const interviewRecorderRef = useRef<MediaRecorder | null>(null);
+  const interviewAudioStreamRef = useRef<MediaStream | null>(null);
+  const interviewAudioChunksRef = useRef<Blob[]>([]);
+  const interviewAudioTargetRef = useRef<{
+    assessmentType: "technical" | "behavioral";
+    assessmentId: string;
+    questionId: string;
+    format: TechnicalAssessmentQuestion["format"] | "star_text";
+  } | null>(null);
+  const discardInterviewRecordingRef = useRef(false);
+  const transcriptionPollingRef = useRef(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCandidateInterviewRoles(token)
+      .then((result) => {
+        if (!cancelled) {
+          setRoles(result);
+          setSelectedOfferId(result[0]?.id ?? "");
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(errorMessage(cause));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingRoles(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!selectedOfferId) {
+      setPreparation(null);
+      return;
+    }
+
+    let cancelled = false;
+    setPreparation(null);
+    setAssessment(null);
+    setBehavioralAssessment(null);
+    setIsLoadingProfile(true);
+    setError("");
+    fetchCandidateInterviewPreparationProfile(token, selectedOfferId)
+      .then((result) => {
+        if (!cancelled) setPreparation(result);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(errorMessage(cause));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingProfile(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOfferId, token]);
+
+  useEffect(
+    () => () => {
+      transcriptionPollingRef.current = false;
+      discardInterviewRecordingRef.current = true;
+      if (interviewRecorderRef.current?.state === "recording") {
+        interviewRecorderRef.current.stop();
+      }
+      interviewAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
+    },
+    [],
+  );
+
+  async function transcribeInterviewRecording(audio: Blob) {
+    const target = interviewAudioTargetRef.current;
+    if (!target || !audio.size) {
+      setVoiceError("Aucune voix n’a été enregistrée. Réessayez ou saisissez votre réponse.");
+      return;
+    }
+    if (audio.size > 20 * 1024 * 1024) {
+      setVoiceError("L’enregistrement dépasse la limite de 20 Mo. Réessayez ou saisissez votre réponse.");
+      return;
+    }
+
+    setIsTranscribingAnswer(true);
+    setVoiceError("");
+    setVoiceTranscript("");
+    try {
+      const queued = await uploadCandidateInterviewAudio(
+        token,
+        target.assessmentType,
+        target.assessmentId,
+        target.questionId,
+        audio,
+      );
+      let transcription = queued;
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        if (!transcriptionPollingRef.current) return;
+        if (transcription.status === "completed" && transcription.transcript) {
+          setVoiceTranscript(transcription.transcript);
+          if (target.assessmentType === "behavioral") {
+            setBehavioralDraftAnswer(transcription.transcript);
+          } else if (target.format !== "multiple_choice") {
+            setDraftAnswer(transcription.transcript);
+          }
+          setVoiceError("");
+          return;
+        }
+        if (transcription.status === "failed") {
+          throw new ApiError(
+            transcription.error_message ??
+              "La transcription a échoué. Réessayez ou saisissez votre réponse.",
+            502,
+          );
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        if (!transcriptionPollingRef.current) return;
+        transcription = await fetchCandidateInterviewTranscription(token, transcription.id);
+      }
+      throw new ApiError(
+        "La transcription prend trop de temps. Réessayez ou saisissez votre réponse.",
+        504,
+      );
+    } catch (cause: unknown) {
+      if (transcriptionPollingRef.current) setVoiceError(errorMessage(cause));
+    } finally {
+      if (transcriptionPollingRef.current) setIsTranscribingAnswer(false);
+    }
+  }
+
+  async function startInterviewRecording(
+    assessmentType: "technical" | "behavioral",
+    assessmentId: string,
+    questionId: string,
+    format: TechnicalAssessmentQuestion["format"] | "star_text",
+  ) {
+    setVoiceError("");
+    setVoiceTranscript("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceError(
+        "L’enregistrement audio n’est pas pris en charge par ce navigateur. Vous pouvez saisir votre réponse.",
+      );
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      transcriptionPollingRef.current = true;
+      discardInterviewRecordingRef.current = false;
+      interviewAudioTargetRef.current = {
+        assessmentType,
+        assessmentId,
+        questionId,
+        format,
+      };
+      interviewAudioStreamRef.current = stream;
+      interviewRecorderRef.current = recorder;
+      interviewAudioChunksRef.current = [];
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size) interviewAudioChunksRef.current.push(event.data);
+      });
+      recorder.addEventListener(
+        "stop",
+        () => {
+          stream.getTracks().forEach((track) => track.stop());
+          interviewAudioStreamRef.current = null;
+          setIsRecordingAnswer(false);
+          if (discardInterviewRecordingRef.current) return;
+          const recording = new Blob(interviewAudioChunksRef.current, {
+            type: recorder.mimeType || "audio/webm",
+          });
+          void transcribeInterviewRecording(recording);
+        },
+        { once: true },
+      );
+      recorder.start();
+      setIsRecordingAnswer(true);
+    } catch (cause: unknown) {
+      setVoiceError(
+        cause instanceof DOMException && cause.name === "NotAllowedError"
+          ? "L’accès au microphone a été refusé. Autorisez-le ou saisissez votre réponse."
+          : "Impossible d’accéder au microphone. Vérifiez son autorisation ou saisissez votre réponse.",
+      );
+    }
+  }
+
+  function stopInterviewRecording() {
+    if (interviewRecorderRef.current?.state === "recording") {
+      interviewRecorderRef.current.stop();
+    }
+  }
+
+  function isRecordingOtherAnswer(
+    assessmentType: "technical" | "behavioral",
+    assessmentId: string,
+    questionId: string,
+  ): boolean {
+    const target = interviewAudioTargetRef.current;
+    return Boolean(
+      isRecordingAnswer &&
+        target &&
+        (target.assessmentType !== assessmentType ||
+          target.assessmentId !== assessmentId ||
+          target.questionId !== questionId),
+    );
+  }
+
+  async function beginAssessment(skill: string) {
+    if (!preparation) return;
+    setStartingSkill(skill);
+    setError("");
+    setAssessment(null);
+    setBehavioralAssessment(null);
+    setDraftAnswer("");
+    setSelectedOptionId("");
+    try {
+      setAssessment(
+        await startCandidateTechnicalAssessment(token, preparation.role.id, skill),
+      );
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setStartingSkill("");
+    }
+  }
+
+  async function submitAnswer() {
+    if (!assessment) return;
+    const answeredQuestionIds = new Set(assessment.answers.map((answer) => answer.question_id));
+    const question = assessment.questions.find((item) => !answeredQuestionIds.has(item.id));
+    if (!question) return;
+    const answerPayload =
+      question.format === "multiple_choice"
+        ? { question_id: question.id, selected_option_id: selectedOptionId }
+        : { question_id: question.id, answer: draftAnswer };
+    setIsSubmittingAnswer(true);
+    setError("");
+    try {
+      setAssessment(
+        await submitCandidateTechnicalAssessmentAnswer(token, assessment.id, answerPayload),
+      );
+      setDraftAnswer("");
+      setSelectedOptionId("");
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setIsSubmittingAnswer(false);
+    }
+  }
+
+  async function beginBehavioralAssessment(competencyId: string) {
+    if (!preparation) return;
+    setStartingCompetency(competencyId);
+    setError("");
+    setBehavioralAssessment(null);
+    setAssessment(null);
+    setBehavioralDraftAnswer("");
+    try {
+      setBehavioralAssessment(
+        await startCandidateBehavioralAssessment(
+          token,
+          preparation.role.id,
+          competencyId,
+        ),
+      );
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setStartingCompetency("");
+    }
+  }
+
+  async function submitBehavioralAnswer() {
+    if (!behavioralAssessment) return;
+    const answeredQuestionIds = new Set(
+      behavioralAssessment.answers.map((answer) => answer.question_id),
+    );
+    const question = behavioralAssessment.questions.find(
+      (item) => !answeredQuestionIds.has(item.id),
+    );
+    if (!question) return;
+    setIsSubmittingBehavioralAnswer(true);
+    setError("");
+    try {
+      setBehavioralAssessment(
+        await submitCandidateBehavioralAssessmentAnswer(
+          token,
+          behavioralAssessment.id,
+          question.id,
+          behavioralDraftAnswer,
+        ),
+      );
+      setBehavioralDraftAnswer("");
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setIsSubmittingBehavioralAnswer(false);
+    }
+  }
+
+  return (
+    <section className="workspace-page interview-prep-page">
+      <div className="eyebrow">PRÉPARATION À L’ENTRETIEN</div>
+      <h1>Préparer un entretien</h1>
+      <p className="workspace-page__intro">
+        Choisissez une offre pour revoir ses compétences techniques demandées et vous entraîner
+        aux compétences comportementales utiles en entretien.
+      </p>
+      {roles.length > 0 && (
+        <Select
+          label="Offre ciblée"
+          value={selectedOfferId}
+          options={roles.map((role) => ({
+            value: role.id,
+            label: `${role.title} — ${role.location}`,
+          }))}
+          onChange={(event) => setSelectedOfferId(event.target.value)}
+        />
+      )}
+      {isLoadingRoles && <p aria-live="polite">Chargement des offres…</p>}
+      {isLoadingProfile && <p aria-live="polite">Préparation de votre profil…</p>}
+      {error && <p className="workspace-error" role="alert">{error}</p>}
+      {!isLoadingRoles && roles.length === 0 && !error && (
+        <Card className="workspace-empty">
+          <ClipboardCheck size={25} aria-hidden="true" />
+          <h2>Aucune offre disponible pour le moment</h2>
+          <p>Les exigences réelles d’une offre apparaîtront ici dès qu’une offre sera publiée.</p>
+          <Button onClick={() => onNavigate("Mes opportunités")}>Voir les opportunités</Button>
+        </Card>
+      )}
+      {preparation && (
+        <>
+          <Card className="interview-prep-summary">
+            <div className="interview-prep-summary__heading">
+              <div>
+                <span className="eyebrow">OFFRE DE L’EMPLOYEUR</span>
+                <h2>{preparation.role.title}</h2>
+              </div>
+              <Badge tone="accent">{preparation.role.location}</Badge>
+            </div>
+            <p>{preparation.role.description}</p>
+            <p className="form-field__hint">
+              Les compétences techniques ci-dessous proviennent des exigences publiées. Aucun
+              niveau ou poids qui n’est pas indiqué dans l’offre n’est supposé.
+            </p>
+          </Card>
+
+          {mockInterviewPlan && (
+            <section className="interview-prep-section" aria-labelledby="mock-interview-plan">
+              <div>
+                <h2 id="mock-interview-plan">{mockInterviewPlan.title}</h2>
+                <p>Une piste de pratique adaptée à votre préparation actuelle et aux compétences ciblées.</p>
+              </div>
+              <div className="interview-prep-grid">
+                <Card className="interview-prep-card">
+                  <div className="interview-prep-card__heading">
+                    <h3>Priorité suivante</h3>
+                    <Badge tone="accent">{mockInterviewPlan.priorityLabel}</Badge>
+                  </div>
+                  <p>{mockInterviewPlan.summary}</p>
+                  {mockInterviewPlan.onStart && (
+                    <Button onClick={() => void mockInterviewPlan.onStart()}>
+                      {mockInterviewPlan.buttonLabel}
+                    </Button>
+                  )}
+                </Card>
+                <Card className="interview-prep-card">
+                  <div className="interview-prep-card__heading">
+                    <h3>Question de simulation</h3>
+                  </div>
+                  <p>{mockInterviewPlan.question}</p>
+                  <ul>
+                    {mockInterviewPlan.guidance.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </Card>
+              </div>
+            </section>
+          )}
+
+          <section className="interview-prep-section" aria-labelledby="interview-progress-report">
+            <div>
+              <h2 id="interview-progress-report">Rapport de progression</h2>
+              <p>Suivez votre avancement et identifiez les prochaines priorités de préparation.</p>
+            </div>
+            <div className="interview-prep-grid">
+              <Card className="interview-prep-card">
+                <div className="interview-prep-card__heading">
+                  <h3>Questions répondues</h3>
+                  <Badge tone="accent">{progressReport.answeredQuestions}/{progressReport.totalQuestions}</Badge>
+                </div>
+                <p>Nombre total de réponses enregistrées sur les exercices et questions de l’offre.</p>
+              </Card>
+              <Card className="interview-prep-card">
+                <div className="interview-prep-card__heading">
+                  <h3>Score moyen</h3>
+                  <Badge tone="success">{progressReport.averageScore}/100</Badge>
+                </div>
+                <p>Score moyen calculé à partir des évaluations déjà reçues.</p>
+              </Card>
+              <Card className="interview-prep-card">
+                <div className="interview-prep-card__heading">
+                  <h3>Évaluations complètes</h3>
+                  <Badge tone="accent">{progressReport.completedAssessments}</Badge>
+                </div>
+                <p>Nombre d’évaluations avec au moins une réponse validée.</p>
+              </Card>
+            </div>
+            <Card className="interview-prep-card">
+              <div className="interview-prep-card__heading">
+                <h3>Progression globale</h3>
+                <Badge tone="accent">{progressReport.globalProgress}%</Badge>
+              </div>
+              <div className="progress" role="progressbar" aria-label="Progression du rapport d’entraînement" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressReport.globalProgress}>
+                <span className="progress__fill" style={{ width: `${progressReport.globalProgress}%` }} />
+              </div>
+              <ul>
+                {progressReport.recommendations.map((recommendation) => (
+                  <li key={recommendation}>{recommendation}</li>
+                ))}
+              </ul>
+            </Card>
+          </section>
+
+          {communicationSignals && (
+            <section className="interview-prep-section" aria-labelledby="interview-communication-signals">
+              <div>
+                <h2 id="interview-communication-signals">Signaux de communication</h2>
+                <p>
+                  Analyse de votre réponse actuelle. Ce repérage est un outil de coaching, pas un
+                  score de sélection.
+                </p>
+              </div>
+              <div className="interview-prep-grid">
+                {communicationSignals.signals.map((signal) => (
+                  <Card className="interview-prep-card" key={signal.label}>
+                    <div className="interview-prep-card__heading">
+                      <h3>{signal.label}</h3>
+                      <Badge tone={signal.tone === "good" ? "success" : "accent"}>
+                        {signal.tone === "good" ? "Bon" : "À améliorer"}
+                      </Badge>
+                    </div>
+                    <p>{signal.detail}</p>
+                  </Card>
+                ))}
+              </div>
+              <Card className="interview-prep-card">
+                <div className="interview-prep-card__heading">
+                  <h3>Exercices de pratique</h3>
+                  <Badge tone="accent">{communicationSignals.score}/100</Badge>
+                </div>
+                <ol>
+                  {communicationSignals.exercises.map((exercise) => (
+                    <li key={exercise.title}>
+                      <strong>{exercise.title}</strong> : {exercise.prompt}
+                    </li>
+                  ))}
+                </ol>
+              </Card>
+            </section>
+          )}
+
+          <section className="interview-prep-section" aria-labelledby="interview-hard-skills">
+            <div>
+              <h2 id="interview-hard-skills">Compétences techniques de l’offre</h2>
+              <p>Préparez un exemple concret et votre façon de vérifier le résultat.</p>
+            </div>
+            {preparation.required_competencies.length > 0 ? (
+              <div className="interview-prep-grid">
+                {preparation.required_competencies.map((competency) => (
+                  <Card className="interview-prep-card" key={competency.id}>
+                    <div className="interview-prep-card__heading">
+                      <h3>{competency.name}</h3>
+                      <Badge tone={competency.candidate_evidence === "self_reported" ? "success" : "warning"}>
+                        {competency.candidate_evidence === "self_reported"
+                          ? "Déclarée dans votre profil"
+                          : "À préparer"}
+                      </Badge>
+                    </div>
+                    <p>{competency.description}</p>
+                    <ul>
+                      {competency.assessment_criteria.map((criterion) => (
+                        <li key={criterion}>{criterion}</li>
+                      ))}
+                    </ul>
+                    <span className="form-field__hint">
+                      Indication du profil, non vérifiée par une évaluation.
+                    </span>
+                    <Button
+                      variant="secondary"
+                      disabled={startingSkill !== "" || isSubmittingAnswer}
+                      onClick={() => void beginAssessment(competency.name)}
+                    >
+                      {startingSkill === competency.name
+                        ? "Préparation…"
+                        : `Évaluer ${competency.name}`}
+                    </Button>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card className="workspace-empty">
+                <p>Cette offre ne précise pas de compétence technique requise.</p>
+              </Card>
+            )}
+          </section>
+
+          {assessment && (
+            <Card className="interview-assessment">
+              <div className="interview-assessment__heading">
+                <div>
+                  <span className="eyebrow">ÉVALUATION TECHNIQUE</span>
+                  <h2>{assessment.skill} — {assessment.offer_title}</h2>
+                </div>
+                <Badge tone={assessment.status === "completed" ? "success" : "accent"}>
+                  {assessment.status === "completed" ? "Terminée" : "En cours"}
+                </Badge>
+              </div>
+              <p className="form-field__hint">
+                Questions de connaissance, exercices textuels et mises en situation. Le code
+                éventuellement saisi est évalué comme du texte et n’est jamais exécuté.
+              </p>
+              {assessment.answers.map((answer) => {
+                const question = assessment.questions.find(
+                  (item) => item.id === answer.question_id,
+                );
+                return (
+                  <div className="interview-assessment-result" key={answer.question_id}>
+                    <div className="interview-assessment-result__heading">
+                      <strong>{question?.type === "knowledge" ? "Connaissance" : question?.type === "practical" ? "Exercice pratique" : "Mise en situation"}</strong>
+                      <Badge tone={answer.evaluation.score > 0 ? "success" : "warning"}>
+                        {answer.evaluation.score}/{answer.evaluation.max_score}
+                      </Badge>
+                    </div>
+                    <p>{answer.evaluation.explanation}</p>
+                    {answer.evaluation.strengths.length > 0 && (
+                      <p><strong>Points forts :</strong> {answer.evaluation.strengths.join(" ")}</p>
+                    )}
+                    {answer.evaluation.weaknesses.length > 0 && (
+                      <p><strong>À approfondir :</strong> {answer.evaluation.weaknesses.join(" ")}</p>
+                    )}
+                    {answer.evaluation.suggested_improvements.length > 0 && (
+                      <p><strong>Pour progresser :</strong> {answer.evaluation.suggested_improvements.join(" ")}</p>
+                    )}
+                    <ul>
+                      {answer.evaluation.criteria_scores.map((criterion) => (
+                        <li key={criterion.criterion_id}>
+                          {criterion.label} : {criterion.score}/{criterion.max_score}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+              {assessment.status === "completed" ? (
+                <p role="status">Toutes les questions de cette évaluation ont été traitées.</p>
+              ) : (
+                (() => {
+                  const answeredIds = new Set(assessment.answers.map((answer) => answer.question_id));
+                  const question = assessment.questions.find((item) => !answeredIds.has(item.id));
+                  if (!question) return null;
+                  return (
+                    <div className="interview-assessment-question">
+                      <span className="eyebrow">
+                        QUESTION {assessment.answers.length + 1} SUR {assessment.questions.length}
+                      </span>
+                      <h3>{question.prompt}</h3>
+                      {question.format === "multiple_choice" ? (
+                        <fieldset className="interview-assessment-options">
+                          <legend>Choisissez une réponse</legend>
+                          {question.options.map((option) => (
+                            <label key={option.id}>
+                              <input
+                                type="radio"
+                                name={`assessment-${assessment.id}-${question.id}`}
+                                value={option.id}
+                                checked={selectedOptionId === option.id}
+                                onChange={() => setSelectedOptionId(option.id)}
+                              />
+                              <span>{option.label}</span>
+                            </label>
+                          ))}
+                        </fieldset>
+                      ) : (
+                        <label className="interview-assessment-text">
+                          <span>Votre réponse</span>
+                          <textarea
+                            className="input"
+                            value={draftAnswer}
+                            maxLength={10000}
+                            rows={5}
+                            onChange={(event) => setDraftAnswer(event.target.value)}
+                          />
+                        </label>
+                      )}
+                      <div className="interview-voice-controls">
+                        <Button
+                          type="button"
+                          variant={isRecordingAnswer ? "secondary" : "ghost"}
+                          disabled={
+                            isTranscribingAnswer ||
+                            isRecordingOtherAnswer("technical", assessment.id, question.id)
+                          }
+                          onClick={() =>
+                            isRecordingAnswer
+                              ? stopInterviewRecording()
+                              : void startInterviewRecording(
+                                  "technical",
+                                  assessment.id,
+                                  question.id,
+                                  question.format,
+                                )
+                          }
+                        >
+                          {isRecordingAnswer ? (
+                            <><Square size={16} aria-hidden="true" /> Arrêter l’enregistrement</>
+                          ) : (
+                            <><Mic size={16} aria-hidden="true" /> Enregistrer une réponse vocale</>
+                          )}
+                        </Button>
+                        {isTranscribingAnswer && (
+                          <span role="status">Transcription en cours…</span>
+                        )}
+                      </div>
+                      {voiceTranscript && (
+                        <p className="interview-voice-transcript" role="status">
+                          <strong>Transcription à vérifier :</strong> {voiceTranscript}
+                          {question.format === "multiple_choice" &&
+                            " Choisissez ensuite l’option correspondante."}
+                        </p>
+                      )}
+                      {voiceError && <p className="workspace-error" role="alert">{voiceError}</p>}
+                      <Button
+                        disabled={
+                          isSubmittingAnswer ||
+                          isRecordingAnswer ||
+                          isTranscribingAnswer ||
+                          (question.format === "multiple_choice"
+                            ? !selectedOptionId
+                            : !draftAnswer.trim())
+                        }
+                        onClick={() => void submitAnswer()}
+                      >
+                        {isSubmittingAnswer ? "Évaluation…" : "Envoyer ma réponse"}
+                      </Button>
+                    </div>
+                  );
+                })()
+              )}
+            </Card>
+          )}
+
+          <section className="interview-prep-section" aria-labelledby="interview-soft-skills">
+            <div>
+              <h2 id="interview-soft-skills">Pistes pour les compétences comportementales</h2>
+              <p>
+                Conseils généraux de préparation Mahara Match — ils ne sont pas présentés comme
+                des exigences de cet employeur.
+              </p>
+            </div>
+            <div className="interview-prep-grid">
+              {preparation.suggested_competencies.map((competency) => (
+                <Card className="interview-prep-card" key={competency.id}>
+                  <div className="interview-prep-card__heading">
+                    <h3>{competency.name}</h3>
+                    <Badge>{competency.category === "communication" ? "Communication" : "Suggestion"}</Badge>
+                  </div>
+                  <p>{competency.description}</p>
+                  <ul>
+                    {competency.assessment_criteria.map((criterion) => (
+                      <li key={criterion}>{criterion}</li>
+                    ))}
+                  </ul>
+                  <Button
+                    variant="secondary"
+                    disabled={startingCompetency !== "" || isSubmittingBehavioralAnswer}
+                    onClick={() => void beginBehavioralAssessment(competency.id)}
+                  >
+                    {startingCompetency === competency.id
+                      ? "Préparation…"
+                      : `S’entraîner : ${competency.name}`}
+                  </Button>
+                </Card>
+              ))}
+            </div>
+          </section>
+
+          {behavioralAssessment && (
+            <Card className="interview-assessment">
+              <div className="interview-assessment__heading">
+              <div>
+                <span className="eyebrow">ENTRAÎNEMENT COMPORTEMENTAL</span>
+                <h2>{behavioralAssessment.competency_name} — {behavioralAssessment.offer_title}</h2>
+              </div>
+              <Badge tone={behavioralAssessment.status === "completed" ? "success" : "accent"}>
+                {behavioralAssessment.status === "completed" ? "Terminée" : "En cours"}
+              </Badge>
+              </div>
+              <p className="form-field__hint">
+              Entraînement général, et non critère de sélection de l’employeur. Les exemples
+              professionnels, scolaires, personnels, bénévoles ou de groupe sont tous recevables.
+              Cette évaluation porte sur le contenu décrit, pas sur votre personnalité.
+              </p>
+              {behavioralAssessment.answers.map((answer) => {
+              const question = behavioralAssessment.questions.find(
+                (item) => item.id === answer.question_id,
+              );
+              return (
+                <div className="interview-assessment-result" key={answer.question_id}>
+                  <div className="interview-assessment-result__heading">
+                    <strong>{question?.type === "behavioral" ? "Réponse STAR" : "Question de mise en situation"}</strong>
+                    <Badge tone="success">
+                      {answer.evaluation.score}/{answer.evaluation.max_score}
+                    </Badge>
+                  </div>
+                  <p>{answer.evaluation.explanation}</p>
+                  {Object.entries(answer.evaluation.star_scores).length > 0 && (
+                    <ul>
+                      {Object.entries(answer.evaluation.star_scores).map(([component, score]) => (
+                        <li key={component}>
+                          {component.toLocaleUpperCase("fr-FR")} : {score.score}/{score.max_score}
+                          {score.evidence ? ` — ${score.evidence}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {answer.evaluation.strengths.length > 0 && (
+                    <p><strong>Points forts :</strong> {answer.evaluation.strengths.join(" ")}</p>
+                  )}
+                  {answer.evaluation.weaknesses.length > 0 && (
+                    <p><strong>À approfondir :</strong> {answer.evaluation.weaknesses.join(" ")}</p>
+                  )}
+                  {answer.evaluation.suggested_improvements.length > 0 && (
+                    <p><strong>Pour progresser :</strong> {answer.evaluation.suggested_improvements.join(" ")}</p>
+                  )}
+                  <ul>
+                    {answer.evaluation.criteria_scores.map((criterion) => (
+                      <li key={criterion.criterion_id}>
+                        {criterion.label} : {criterion.score}/{criterion.max_score}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+              })}
+              {behavioralAssessment.status === "completed" ? (
+              <p role="status">Les réponses comportementales ont été enregistrées.</p>
+              ) : (
+              (() => {
+                const answeredIds = new Set(
+                  behavioralAssessment.answers.map((answer) => answer.question_id),
+                );
+                const question = behavioralAssessment.questions.find(
+                  (item) => !answeredIds.has(item.id),
+                );
+                if (!question) return null;
+                return (
+                  <div className="interview-assessment-question">
+                    <span className="eyebrow">
+                      QUESTION {behavioralAssessment.answers.length + 1} SUR {behavioralAssessment.questions.length}
+                    </span>
+                    <h3>{question.prompt}</h3>
+                    {question.type === "behavioral" && (
+                      <p className="form-field__hint">
+                        Structurez votre exemple : Situation, Tâche, Action, Résultat (STAR).
+                      </p>
+                    )}
+                    <label className="interview-assessment-text">
+                      <span>Votre réponse</span>
+                      <textarea
+                        className="input"
+                        value={behavioralDraftAnswer}
+                        maxLength={10000}
+                        rows={5}
+                        onChange={(event) => setBehavioralDraftAnswer(event.target.value)}
+                      />
+                    </label>
+                    <div className="interview-voice-controls">
+                      <Button
+                        type="button"
+                        variant={isRecordingAnswer ? "secondary" : "ghost"}
+                        disabled={
+                          isTranscribingAnswer ||
+                          isRecordingOtherAnswer(
+                            "behavioral",
+                            behavioralAssessment.id,
+                            question.id,
+                          )
+                        }
+                        onClick={() =>
+                          isRecordingAnswer
+                            ? stopInterviewRecording()
+                            : void startInterviewRecording(
+                                "behavioral",
+                                behavioralAssessment.id,
+                                question.id,
+                                "star_text",
+                              )
+                        }
+                      >
+                        {isRecordingAnswer ? (
+                          <><Square size={16} aria-hidden="true" /> Arrêter l’enregistrement</>
+                        ) : (
+                          <><Mic size={16} aria-hidden="true" /> Enregistrer une réponse vocale</>
+                        )}
+                      </Button>
+                      {isTranscribingAnswer && (
+                        <span role="status">Transcription en cours…</span>
+                      )}
+                    </div>
+                    {voiceTranscript && (
+                      <p className="interview-voice-transcript" role="status">
+                        <strong>Transcription à vérifier :</strong> {voiceTranscript}
+                      </p>
+                    )}
+                    {voiceError && <p className="workspace-error" role="alert">{voiceError}</p>}
+                    <Button
+                      disabled={
+                        isSubmittingBehavioralAnswer ||
+                        isRecordingAnswer ||
+                        isTranscribingAnswer ||
+                        !behavioralDraftAnswer.trim()
+                      }
+                      onClick={() => void submitBehavioralAnswer()}
+                    >
+                      {isSubmittingBehavioralAnswer ? "Évaluation…" : "Envoyer ma réponse"}
+                    </Button>
+                  </div>
+                );
+              })()
+              )}
+            </Card>
+          )}
+
+          <details className="interview-prep-levels">
+            <summary>Repères de niveaux de maîtrise</summary>
+            <ol>
+              {preparation.proficiency_levels.map((level) => (
+                <li key={level.level}>
+                  <strong>{level.level} — {level.name} :</strong> {level.description}
+                </li>
+              ))}
+            </ol>
+            <p className="form-field__hint">
+              Ces repères sont généraux. L’offre sélectionnée ne fournit pas de niveau requis.
+            </p>
+          </details>
+        </>
       )}
     </section>
   );

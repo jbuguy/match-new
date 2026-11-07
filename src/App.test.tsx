@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { AuthUser, Role } from "./auth";
+import { analyzeCommunicationSignals, summarizeInterviewProgress } from "./workspaces";
 
 const userForRole = (role: Role): AuthUser => ({
   id: `user-${role}`,
@@ -19,6 +20,8 @@ function authenticate(role: Role) {
         payload = userForRole(role);
       } else if (input.endsWith("/candidate/roadmap")) {
         payload = { steps: [], completed_steps: 0, total_steps: 0, progress_percent: 0 };
+      } else if (input.endsWith("/candidate/interview-prep/roles")) {
+        payload = [];
       } else if (input.endsWith("/admin/indicators")) {
         payload = {
           start_date: null,
@@ -104,6 +107,7 @@ describe("role-aware app shell", () => {
         "Vue d’ensemble",
         "Mes opportunités",
         "Mon parcours",
+        "Préparer un entretien",
         "Formations",
         "Mes candidatures",
         "Assistant",
@@ -245,6 +249,699 @@ describe("role-aware app shell", () => {
         body: JSON.stringify({ skill: "SQL", completed: true }),
       }),
     );
+  });
+
+  it("shows offer requirements separately from general interview suggestions", async () => {
+    const candidate = userForRole("candidate");
+    const fetchMock = vi.fn().mockImplementation(async (input: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        if (input.endsWith("/auth/me")) return candidate;
+        if (input.endsWith("/candidate/interview-prep/roles")) {
+          return [{
+            id: "offer-1",
+            title: "Développeuse Python",
+            description: "Créer des services.",
+            location: "Tunis",
+            required_skills: ["Python", "SQL"],
+          }];
+        }
+        if (input.endsWith("/candidate/interview-prep/profiles/offer-1")) {
+          return {
+            role: {
+              id: "offer-1",
+              title: "Développeuse Python",
+              description: "Créer des services.",
+              location: "Tunis",
+              required_skills: ["Python", "SQL"],
+            },
+            required_competencies: [
+              {
+                id: "hard:python",
+                name: "Python",
+                description: "Python est indiquée comme compétence requise dans cette offre.",
+                category: "hard",
+                associated_skill: "Python",
+                assessment_criteria: ["Présentez un exemple concret."],
+                required_proficiency_level: null,
+                importance_weight: null,
+                mandatory: true,
+                source: "job_offer",
+                candidate_evidence: "self_reported",
+              },
+              {
+                id: "hard:sql",
+                name: "SQL",
+                description: "SQL est indiquée comme compétence requise dans cette offre.",
+                category: "hard",
+                associated_skill: "SQL",
+                assessment_criteria: ["Expliquez votre méthode."],
+                required_proficiency_level: null,
+                importance_weight: null,
+                mandatory: true,
+                source: "job_offer",
+                candidate_evidence: "gap",
+              },
+            ],
+            suggested_competencies: [
+              {
+                id: "communication",
+                name: "Communication",
+                description: "Présenter une idée clairement.",
+                category: "communication",
+                associated_skill: null,
+                assessment_criteria: ["Structurez votre réponse."],
+                required_proficiency_level: null,
+                importance_weight: null,
+                mandatory: false,
+                source: "platform_guidance",
+                candidate_evidence: "not_assessed",
+              },
+            ],
+            proficiency_levels: [
+              { level: 1, name: "Débutant", description: "Notions de base." },
+            ],
+          };
+        }
+        return {};
+      },
+    }));
+    sessionStorage.setItem("mahara-match-token", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByRole("navigation", { name: /navigation principale/i });
+    fireEvent.click(screen.getByRole("button", { name: "Préparer un entretien" }));
+
+    expect(await screen.findByRole("heading", { name: "Développeuse Python" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Python" })).toBeVisible();
+    expect(screen.getByText("Déclarée dans votre profil")).toBeVisible();
+    expect(screen.getByText("À préparer")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Communication" })).toBeVisible();
+    expect(
+      screen.getByText(/ils ne sont pas présentés comme des exigences de cet employeur/i),
+    ).toBeVisible();
+  });
+
+  it("shows an adaptive mock interview plan for the selected role", async () => {
+    const candidate = userForRole("candidate");
+    const fetchMock = vi.fn().mockImplementation(async (input: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        if (input.endsWith("/auth/me")) return candidate;
+        if (input.endsWith("/candidate/interview-prep/roles")) {
+          return [{
+            id: "offer-1",
+            title: "Développeuse Python",
+            description: "Créer des services.",
+            location: "Tunis",
+            required_skills: ["Python", "SQL"],
+          }];
+        }
+        if (input.endsWith("/candidate/interview-prep/profiles/offer-1")) {
+          return {
+            role: {
+              id: "offer-1",
+              title: "Développeuse Python",
+              description: "Créer des services.",
+              location: "Tunis",
+              required_skills: ["Python", "SQL"],
+            },
+            required_competencies: [
+              {
+                id: "hard:python",
+                name: "Python",
+                description: "Python est indiquée comme compétence requise dans cette offre.",
+                category: "hard",
+                associated_skill: "Python",
+                assessment_criteria: ["Présentez un exemple concret."],
+                required_proficiency_level: null,
+                importance_weight: null,
+                mandatory: true,
+                source: "job_offer",
+                candidate_evidence: "gap",
+              },
+            ],
+            suggested_competencies: [
+              {
+                id: "communication",
+                name: "Communication",
+                description: "Présenter une idée clairement.",
+                category: "communication",
+                associated_skill: null,
+                assessment_criteria: ["Structurez votre réponse."],
+                required_proficiency_level: null,
+                importance_weight: null,
+                mandatory: false,
+                source: "platform_guidance",
+                candidate_evidence: "not_assessed",
+              },
+            ],
+            proficiency_levels: [
+              { level: 1, name: "Débutant", description: "Notions de base." },
+            ],
+          };
+        }
+        return {};
+      },
+    }));
+    sessionStorage.setItem("mahara-match-token", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByRole("navigation", { name: /navigation principale/i });
+    fireEvent.click(screen.getByRole("button", { name: "Préparer un entretien" }));
+
+    expect(await screen.findByText("Simulation d’entretien adaptative")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Lancer une simulation Python/i })).toBeVisible();
+  });
+
+  it("runs a persisted technical assessment and displays its evaluation", async () => {
+    const candidate = userForRole("candidate");
+    const questions = [
+      {
+        id: "q1",
+        type: "knowledge",
+        format: "multiple_choice",
+        skill: "Python",
+        prompt: "Quelle affirmation décrit correctement les listes et les tuples en Python ?",
+        options: [
+          { id: "a", label: "Une liste est modifiable, tandis qu'un tuple ne l'est pas." },
+          { id: "b", label: "Une liste et un tuple sont tous deux immuables." },
+        ],
+        criteria: [],
+      },
+      {
+        id: "q2",
+        type: "practical",
+        format: "text_exercise",
+        skill: "Python",
+        prompt: "Décrivez une démarche.",
+        options: [],
+        criteria: [{ id: "reasoning", label: "Raisonnement" }],
+      },
+      {
+        id: "q3",
+        type: "scenario",
+        format: "text_exercise",
+        skill: "Python",
+        prompt: "Une tâche ne fonctionne pas.",
+        options: [],
+        criteria: [{ id: "diagnosis", label: "Diagnostic" }],
+      },
+    ];
+    const initialAssessment = {
+      id: "assessment-1",
+      offer_id: "offer-1",
+      offer_title: "Développeuse Python",
+      skill: "Python",
+      status: "in_progress",
+      questions,
+      answers: [],
+      created_at: "2026-11-07T10:00:00Z",
+      updated_at: "2026-11-07T10:00:00Z",
+    };
+    const answeredAssessment = {
+      ...initialAssessment,
+      answers: [{
+        question_id: "q1",
+        answer: questions[0].options[0].label,
+        evaluation: {
+          score: 5,
+          max_score: 5,
+          criteria_scores: [{
+            criterion_id: "correctness",
+            label: "Exactitude technique",
+            score: 5,
+            max_score: 5,
+          }],
+          explanation: "Réponse correcte.",
+          strengths: ["La notion est comprise."],
+          weaknesses: [],
+          suggested_improvements: [],
+          method: "deterministic",
+        },
+        created_at: "2026-11-07T10:01:00Z",
+      }],
+    };
+    const fetchMock = vi.fn().mockImplementation(async (input: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        if (input.endsWith("/auth/me")) return candidate;
+        if (input.endsWith("/candidate/interview-prep/roles")) {
+          return [{
+            id: "offer-1",
+            title: "Développeuse Python",
+            description: "Créer des services.",
+            location: "Tunis",
+            required_skills: ["Python"],
+          }];
+        }
+        if (input.endsWith("/candidate/interview-prep/profiles/offer-1")) {
+          return {
+            role: {
+              id: "offer-1",
+              title: "Développeuse Python",
+              description: "Créer des services.",
+              location: "Tunis",
+              required_skills: ["Python"],
+            },
+            required_competencies: [{
+              id: "hard:python",
+              name: "Python",
+              description: "Requise.",
+              category: "hard",
+              associated_skill: "Python",
+              assessment_criteria: ["Présentez un exemple."],
+              required_proficiency_level: null,
+              importance_weight: null,
+              mandatory: true,
+              source: "job_offer",
+              candidate_evidence: "gap",
+            }],
+            suggested_competencies: [],
+            proficiency_levels: [],
+          };
+        }
+        if (input.endsWith("/candidate/interview-prep/assessments")) {
+          return initialAssessment;
+        }
+        if (input.endsWith("/answers")) return answeredAssessment;
+        return {};
+      },
+    }));
+    sessionStorage.setItem("mahara-match-token", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByRole("navigation", { name: /navigation principale/i });
+    fireEvent.click(screen.getByRole("button", { name: "Préparer un entretien" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Évaluer Python" }));
+    expect(await screen.findByText(/question 1 sur 3/i)).toBeVisible();
+    fireEvent.click(screen.getByLabelText(/une liste est modifiable/i));
+    fireEvent.click(screen.getByRole("button", { name: "Envoyer ma réponse" }));
+
+    expect(await screen.findByText("Réponse correcte.")).toBeVisible();
+    expect(screen.getByText("5/5")).toBeVisible();
+    expect(screen.getByText(/question 2 sur 3/i)).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/candidate/interview-prep/assessments/assessment-1/answers"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question_id: "q1", selected_option_id: "a" }),
+      }),
+    );
+  });
+
+  it("runs a STAR behavioral assessment and displays structured feedback", async () => {
+    const candidate = userForRole("candidate");
+    const behavioralAssessment = {
+      id: "behavioral-1",
+      offer_id: "offer-1",
+      offer_title: "Développeuse Python",
+      competency_id: "teamwork",
+      competency_name: "Travail en équipe",
+      status: "in_progress",
+      questions: [
+        {
+          id: "q1",
+          type: "behavioral",
+          format: "star_text",
+          competency_id: "teamwork",
+          competency_name: "Travail en équipe",
+          prompt: "Décrivez une expérience réelle selon STAR.",
+          criteria: [{ id: "clarity", label: "Clarté de la réponse" }],
+          star_components: [
+            { id: "situation", label: "Situation" },
+            { id: "task", label: "Task" },
+            { id: "action", label: "Action" },
+            { id: "result", label: "Result" },
+          ],
+        },
+        {
+          id: "q2",
+          type: "situational",
+          format: "text_answer",
+          competency_id: "teamwork",
+          competency_name: "Travail en équipe",
+          prompt: "Comment partageriez-vous les informations ?",
+          criteria: [{ id: "reasoning", label: "Raisonnement" }],
+          star_components: [],
+        },
+      ],
+      answers: [],
+      created_at: "2026-11-07T10:00:00Z",
+      updated_at: "2026-11-07T10:00:00Z",
+    };
+    const scoredAssessment = {
+      ...behavioralAssessment,
+      answers: [
+        {
+          question_id: "q1",
+          answer: "Dans un projet scolaire, notre équipe devait livrer une présentation.",
+          evaluation: {
+            score: 7,
+            max_score: 10,
+            criteria_scores: [{
+              criterion_id: "clarity",
+              label: "Clarté de la réponse",
+              score: 4,
+              max_score: 5,
+            }],
+            star_scores: {
+              situation: { score: 3, max_score: 5, evidence: "Projet scolaire." },
+              task: { score: 3, max_score: 5, evidence: "Livrer la présentation." },
+              action: { score: 4, max_score: 5, evidence: "A réparti les tâches." },
+              result: { score: 3, max_score: 5, evidence: "Présentation livrée." },
+            },
+            explanation: "Votre exemple présente une action concrète.",
+            strengths: ["Votre contribution est visible."],
+            weaknesses: ["Le résultat peut être précisé."],
+            suggested_improvements: ["Ajoutez un résultat observable."],
+            method: "llm",
+          },
+          created_at: "2026-11-07T10:01:00Z",
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockImplementation(async (input: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        if (input.endsWith("/auth/me")) return candidate;
+        if (input.endsWith("/candidate/interview-prep/roles")) {
+          return [{
+            id: "offer-1",
+            title: "Développeuse Python",
+            description: "Créer des services.",
+            location: "Tunis",
+            required_skills: [],
+          }];
+        }
+        if (input.endsWith("/candidate/interview-prep/profiles/offer-1")) {
+          return {
+            role: {
+              id: "offer-1",
+              title: "Développeuse Python",
+              description: "Créer des services.",
+              location: "Tunis",
+              required_skills: [],
+            },
+            required_competencies: [],
+            suggested_competencies: [{
+              id: "teamwork",
+              name: "Travail en équipe",
+              description: "Coopérer avec des collègues.",
+              category: "soft",
+              associated_skill: null,
+              assessment_criteria: ["Décrivez votre contribution."],
+              required_proficiency_level: null,
+              importance_weight: null,
+              mandatory: false,
+              source: "platform_guidance",
+              candidate_evidence: "not_assessed",
+            }],
+            proficiency_levels: [],
+          };
+        }
+        if (input.endsWith("/candidate/interview-prep/behavioral-assessments")) {
+          return behavioralAssessment;
+        }
+        if (input.endsWith("/behavioral-assessments/behavioral-1/answers")) {
+          return scoredAssessment;
+        }
+        return {};
+      },
+    }));
+    sessionStorage.setItem("mahara-match-token", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByRole("navigation", { name: /navigation principale/i });
+    fireEvent.click(screen.getByRole("button", { name: "Préparer un entretien" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "S’entraîner : Travail en équipe" }),
+    );
+    expect(await screen.findByText(/question 1 sur 2/i)).toBeVisible();
+    expect(screen.getByText(/situation, tâche, action, résultat/i)).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Votre réponse"), {
+      target: { value: "Dans un projet scolaire, notre équipe devait livrer une présentation." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Envoyer ma réponse" }));
+
+    expect(await screen.findByText("Votre exemple présente une action concrète.")).toBeVisible();
+    expect(screen.getByText(/SITUATION : 3\/5 — Projet scolaire/i)).toBeVisible();
+    expect(screen.getByText("Votre contribution est visible.")).toBeVisible();
+    expect(screen.getByText(/question 2 sur 2/i)).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/behavioral-assessments/behavioral-1/answers"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          question_id: "q1",
+          answer: "Dans un projet scolaire, notre équipe devait livrer une présentation.",
+        }),
+      }),
+    );
+  });
+
+  it("records a behavioral answer, uploads it and previews the transcript for editing", async () => {
+    class MockMediaRecorder {
+      state: RecordingState = "inactive";
+      mimeType = "audio/webm";
+      private listeners = new Map<string, ((event: Event) => void)[]>();
+
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+        const callback =
+          typeof listener === "function"
+            ? listener
+            : (event: Event) => listener.handleEvent(event);
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), callback]);
+      }
+
+      start() {
+        this.state = "recording";
+      }
+
+      stop() {
+        const data = new Event("dataavailable");
+        Object.defineProperty(data, "data", { value: new Blob(["voice audio"]) });
+        for (const listener of this.listeners.get("dataavailable") ?? []) listener(data);
+        this.state = "inactive";
+        for (const listener of this.listeners.get("stop") ?? []) listener(new Event("stop"));
+      }
+    }
+
+    const candidate = userForRole("candidate");
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
+    const getUserMedia = vi.fn().mockResolvedValue(stream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    vi.stubGlobal("MediaRecorder", MockMediaRecorder);
+
+    const fetchMock = vi.fn().mockImplementation(async (input: string, init?: RequestInit) => ({
+      ok: true,
+      status: input.includes("/transcription") ? 202 : 200,
+      json: async () => {
+        if (input.endsWith("/auth/me")) return candidate;
+        if (input.endsWith("/candidate/interview-prep/roles")) {
+          return [{
+            id: "offer-1",
+            title: "Développeuse Python",
+            description: "Créer des services.",
+            location: "Tunis",
+            required_skills: [],
+          }];
+        }
+        if (input.endsWith("/candidate/interview-prep/profiles/offer-1")) {
+          return {
+            role: {
+              id: "offer-1",
+              title: "Développeuse Python",
+              description: "Créer des services.",
+              location: "Tunis",
+              required_skills: [],
+            },
+            required_competencies: [],
+            suggested_competencies: [{
+              id: "teamwork",
+              name: "Travail en équipe",
+              description: "Coopérer avec des collègues.",
+              category: "soft",
+              associated_skill: null,
+              assessment_criteria: ["Décrivez votre contribution."],
+              required_proficiency_level: null,
+              importance_weight: null,
+              mandatory: false,
+              source: "platform_guidance",
+              candidate_evidence: "not_assessed",
+            }],
+            proficiency_levels: [],
+          };
+        }
+        if (input.endsWith("/candidate/interview-prep/behavioral-assessments")) {
+          return {
+            id: "behavioral-voice-1",
+            offer_id: "offer-1",
+            offer_title: "Développeuse Python",
+            competency_id: "teamwork",
+            competency_name: "Travail en équipe",
+            status: "in_progress",
+            questions: [{
+              id: "q1",
+              type: "behavioral",
+              format: "star_text",
+              competency_id: "teamwork",
+              competency_name: "Travail en équipe",
+              prompt: "Décrivez une expérience selon STAR.",
+              criteria: [{ id: "clarity", label: "Clarté" }],
+              star_components: [],
+            }],
+            answers: [],
+            created_at: "2026-11-07T10:00:00Z",
+            updated_at: "2026-11-07T10:00:00Z",
+          };
+        }
+        if (input.includes("/behavioral-assessments/behavioral-voice-1/questions/q1/transcription")) {
+          const audioForm = init?.body as FormData;
+          expect(audioForm.get("audio")).toBeInstanceOf(File);
+          return {
+            id: "transcription-1",
+            assessment_type: "behavioral",
+            assessment_id: "behavioral-voice-1",
+            question_id: "q1",
+            status: "completed",
+            transcript: "Notre équipe a réparti les tâches et livré le projet.",
+            error_message: null,
+            created_at: "2026-11-07T10:01:00Z",
+            updated_at: "2026-11-07T10:01:00Z",
+          };
+        }
+        return {};
+      },
+    }));
+    sessionStorage.setItem("mahara-match-token", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByRole("navigation", { name: /navigation principale/i });
+    fireEvent.click(screen.getByRole("button", { name: "Préparer un entretien" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "S’entraîner : Travail en équipe" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Enregistrer une réponse vocale" }));
+    expect(await screen.findByRole("button", { name: "Arrêter l’enregistrement" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Arrêter l’enregistrement" }));
+
+    expect((await screen.findByText(/Transcription à vérifier :/)).parentElement).toHaveTextContent(
+      "Notre équipe a réparti les tâches et livré le projet.",
+    );
+    expect(screen.getByLabelText("Votre réponse")).toHaveValue(
+      "Notre équipe a réparti les tâches et livré le projet.",
+    );
+    expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/behavioral-assessments/behavioral-voice-1/questions/q1/transcription"),
+      ),
+    ).toBe(true);
+  });
+
+  it("analyzes communication signals from a candidate answer", () => {
+    const result = analyzeCommunicationSignals(
+      "D'abord, j'ai clarifié le problème avec l'équipe. Ensuite, j'ai choisi une méthode simple et j'ai vérifié le résultat avec un test. Par exemple, lors d'un projet, j'ai partagé les étapes et le client a validé la solution.",
+    );
+
+    expect(result.score).toBeGreaterThan(60);
+    expect(result.signals.some((signal) => signal.label === "Structure")).toBe(true);
+    expect(result.exercises.some((exercise) => exercise.title === "Structure simple")).toBe(true);
+  });
+
+  it("summarizes interview progress from completed assessments", () => {
+    const result = summarizeInterviewProgress({
+      technicalAssessment: {
+        id: "tech-1",
+        offer_id: "offer-1",
+        offer_title: "Développeuse Python",
+        skill: "Python",
+        status: "completed",
+        questions: [{
+          id: "q1",
+          type: "knowledge",
+          format: "multiple_choice",
+          skill: "Python",
+          prompt: "Quelle fonction est utilisée pour itérer ?",
+          options: [{ id: "a", label: "for" }],
+          criteria: [{ id: "correct", label: "Bonne réponse" }],
+        }],
+        answers: [{
+          question_id: "q1",
+          answer: "for",
+          evaluation: {
+            score: 4,
+            max_score: 5,
+            criteria_scores: [{ criterion_id: "correct", label: "Bonne réponse", score: 4, max_score: 5 }],
+            explanation: "Bonne réponse.",
+            strengths: ["Clair"],
+            weaknesses: [],
+            suggested_improvements: ["Exemples"],
+            method: "deterministic",
+          },
+          created_at: "2026-11-07T11:00:00Z",
+        }],
+        created_at: "2026-11-07T11:00:00Z",
+        updated_at: "2026-11-07T11:00:00Z",
+      },
+      behavioralAssessment: {
+        id: "soft-1",
+        offer_id: "offer-1",
+        offer_title: "Développeuse Python",
+        competency_id: "teamwork",
+        competency_name: "Travail en équipe",
+        status: "completed",
+        questions: [{
+          id: "q1",
+          type: "behavioral",
+          format: "star_text",
+          competency_id: "teamwork",
+          competency_name: "Travail en équipe",
+          prompt: "Décrivez votre exemple.",
+          criteria: [{ id: "clarity", label: "Clarté" }],
+          star_components: [{ id: "situation", label: "Situation" }],
+        }],
+        answers: [{
+          question_id: "q1",
+          answer: "J'ai travaillé en équipe.",
+          evaluation: {
+            score: 3,
+            max_score: 5,
+            criteria_scores: [{ criterion_id: "clarity", label: "Clarté", score: 3, max_score: 5 }],
+            explanation: "Bonne structure.",
+            strengths: ["Clair"],
+            weaknesses: [],
+            suggested_improvements: ["Tester"],
+            star_scores: { situation: { score: 3, max_score: 5, evidence: "Contexte clair" } },
+            method: "llm",
+          },
+          created_at: "2026-11-07T11:00:00Z",
+        }],
+        created_at: "2026-11-07T11:00:00Z",
+        updated_at: "2026-11-07T11:00:00Z",
+      },
+    });
+
+    expect(result.answeredQuestions).toBe(2);
+    expect(result.totalQuestions).toBe(2);
+    expect(result.globalProgress).toBe(100);
+    expect(result.averageScore).toBeGreaterThan(0);
+    expect(result.recommendations.length).toBeGreaterThan(0);
   });
 
   it("supports switching the app shell to dark mode", async () => {

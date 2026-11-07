@@ -10,6 +10,7 @@ class Permission(str, Enum):
     MATCH_READ_OWN = "match:read:own"
     APPLICATION_MANAGE_OWN = "application:manage:own"
     ROADMAP_MANAGE_OWN = "roadmap:manage:own"
+    INTERVIEW_PREP_READ_OWN = "interview_prep:read:own"
     CHAT_MANAGE_OWN = "chat:manage:own"
     OFFER_MANAGE_ORGANISATION = "offer:manage:organisation"
     APPLICATION_MANAGE_ORGANISATION = "application:manage:organisation"
@@ -41,6 +42,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.COURSE_READ_PUBLISHED,
             Permission.COURSE_ENROLL,
             Permission.ROADMAP_MANAGE_OWN,
+            Permission.INTERVIEW_PREP_READ_OWN,
             Permission.CHAT_MANAGE_OWN,
         }
     ),

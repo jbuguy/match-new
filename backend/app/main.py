@@ -2,12 +2,22 @@ import os
 import json
 import logging
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.assistant_services import (
     AssistantServiceError,
@@ -25,17 +35,33 @@ from app.assistant_rag import (
     retrieve_assistant_evidence,
 )
 from app.audit import record_audit_event, record_sensitive_read
+from app.behavioral_assessment import (
+    evaluate_behavioral_answer,
+    generate_behavioral_questions,
+    get_behavioral_competency,
+    public_behavioral_question,
+)
 from app.career_roadmap import RoadmapStep, build_career_roadmap
+from app.competencies import build_role_preparation_profile
+from app.cv_parser import normalize_candidate_profile_from_cv
 from app.database import get_session
 from app.dependencies import get_current_user, require_permission, require_role
 from app.marketplace import router as marketplace_router
 from app.models import (
     AuditEvent,
     CandidateAssistantSession,
+    CandidateBehavioralAssessment,
+    CandidateBehavioralAssessmentAnswer,
+    CandidateInterviewTranscription,
     CandidateProfile,
     CandidateRoadmapStep,
+    CandidateTechnicalAssessment,
+    CandidateTechnicalAssessmentAnswer,
+    BehavioralAssessmentStatus,
+    InterviewTranscriptionStatus,
     JobOffer,
     Role,
+    TechnicalAssessmentStatus,
     User,
 )
 from app.permissions import Permission
@@ -48,6 +74,11 @@ from app.schemas import (
     CandidateAssistantSessionSummary,
     CandidateAssistantResponse,
     CandidateAssistantSpeechRequest,
+    CandidateBehavioralAssessmentResponse,
+    CandidateInterviewTranscriptionResponse,
+    CandidateInterviewPreparationProfileResponse,
+    CandidateInterviewRoleResponse,
+    CandidateTechnicalAssessmentResponse,
     CandidateRoadmapResponse,
     CandidateRoadmapStepResponse,
     CandidateRoadmapStepUpdate,
@@ -55,6 +86,8 @@ from app.schemas import (
     CandidateProfileResponse,
     CandidateProfileUpdate,
     CandidateRegistrationRequest,
+    TechnicalAssessmentAnswerRequest,
+    TechnicalAssessmentStartRequest,
     JobMatchResponse,
     JobOfferCreate,
     JobOfferResponse,
@@ -62,12 +95,23 @@ from app.schemas import (
     LoginResponse,
     UserResponse,
 )
+from app.technical_assessment import (
+    evaluate_objective_answer,
+    evaluate_open_answer,
+    generate_technical_questions,
+    is_multiple_choice,
+    public_question,
+)
 from app.security import (
     DUMMY_PASSWORD_HASH,
     create_access_token,
     hash_password,
     verify_password,
 )
+from app.interview_transcription import process_interview_transcription
+
+
+MAX_INTERVIEW_AUDIO_BYTES = 20 * 1024 * 1024
 
 
 logger = logging.getLogger(__name__)
@@ -273,6 +317,52 @@ def update_candidate_profile(
         education=profile.education,
         experience=profile.experience,
         updated_at=profile.updated_at,
+    )
+
+
+@app.post(
+    "/candidate/profile/cv",
+    response_model=CandidateProfileResponse,
+    tags=["candidate"],
+)
+async def upload_candidate_cv(
+    file: UploadFile = File(...),
+    user: User = Depends(require_permission(Permission.PROFILE_WRITE_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateProfileResponse:
+    if not file.filename or not file.filename.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A CV file is required.",
+        )
+    try:
+        content = await file.read()
+        parsed = await normalize_candidate_profile_from_cv(file.filename, content)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(error),
+        ) from error
+
+    updates = parsed.model_dump(exclude_unset=True)
+    record_audit_event(
+        session,
+        action="candidate.profile.cv_uploaded",
+        actor=user,
+        resource_type="candidate_profile",
+        resource_id=user.id,
+        details={"fields": sorted(updates), "filename": file.filename},
+    )
+    session.commit()
+    return CandidateProfileResponse(
+        user_id=user.id,
+        skills=parsed.skills or [],
+        full_name=parsed.full_name,
+        phone=parsed.phone,
+        location=parsed.location,
+        education=parsed.education,
+        experience=parsed.experience,
+        updated_at=None,
     )
 
 
@@ -805,6 +895,683 @@ def roadmap_response(steps: list[RoadmapStep]) -> CandidateRoadmapResponse:
         completed_steps=completed_steps,
         total_steps=total_steps,
         progress_percent=round(100 * completed_steps / total_steps) if total_steps else 0,
+    )
+
+
+@app.get(
+    "/candidate/interview-prep/roles",
+    response_model=list[CandidateInterviewRoleResponse],
+    tags=["candidate"],
+)
+def candidate_interview_prep_roles(
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> list[CandidateInterviewRoleResponse]:
+    offers = session.scalars(
+        select(JobOffer).order_by(JobOffer.title, JobOffer.id)
+    )
+    return [
+        CandidateInterviewRoleResponse(
+            id=offer.id,
+            title=offer.title,
+            description=offer.description,
+            location=offer.location,
+            required_skills=offer.required_skills,
+        )
+        for offer in offers
+    ]
+
+
+@app.get(
+    "/candidate/interview-prep/profiles/{offer_id}",
+    response_model=CandidateInterviewPreparationProfileResponse,
+    tags=["candidate"],
+)
+def candidate_interview_preparation_profile(
+    offer_id: str,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateInterviewPreparationProfileResponse:
+    offer = session.get(JobOffer, offer_id)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This job offer could not be found.",
+        )
+    profile = session.get(CandidateProfile, user.id)
+    response = CandidateInterviewPreparationProfileResponse.model_validate(
+        build_role_preparation_profile(offer, profile.skills if profile else [])
+    )
+    record_sensitive_read(
+        session,
+        actor=user,
+        resource_type="candidate_interview_preparation_profile",
+        resource_id=user.id,
+    )
+    session.commit()
+    return response
+
+
+@app.post(
+    "/candidate/interview-prep/assessments",
+    response_model=CandidateTechnicalAssessmentResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["candidate"],
+)
+def start_candidate_technical_assessment(
+    request: TechnicalAssessmentStartRequest,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateTechnicalAssessmentResponse:
+    offer = session.get(JobOffer, request.offer_id)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This job offer could not be found.",
+        )
+    matching_skill = next(
+        (
+            skill.strip()
+            for skill in offer.required_skills
+            if skill.strip().casefold() == request.skill.casefold()
+        ),
+        None,
+    )
+    if matching_skill is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This skill is not required by the selected offer.",
+        )
+
+    assessment = CandidateTechnicalAssessment(
+        candidate_id=user.id,
+        job_offer_id=offer.id,
+        skill=matching_skill,
+        questions=generate_technical_questions(matching_skill),
+        status=TechnicalAssessmentStatus.IN_PROGRESS,
+    )
+    session.add(assessment)
+    record_audit_event(
+        session,
+        action="candidate.technical_assessment.started",
+        actor=user,
+        resource_type="technical_assessment",
+        details={"question_count": 3},
+    )
+    session.commit()
+    session.refresh(assessment)
+    return technical_assessment_response(session, assessment, offer)
+
+
+@app.get(
+    "/candidate/interview-prep/assessments/{assessment_id}",
+    response_model=CandidateTechnicalAssessmentResponse,
+    tags=["candidate"],
+)
+def get_candidate_technical_assessment(
+    assessment_id: str,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateTechnicalAssessmentResponse:
+    assessment = session.scalar(
+        select(CandidateTechnicalAssessment).where(
+            CandidateTechnicalAssessment.id == assessment_id,
+            CandidateTechnicalAssessment.candidate_id == user.id,
+        )
+    )
+    if assessment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment could not be found.",
+        )
+    offer = session.get(JobOffer, assessment.job_offer_id)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment's job offer could not be found.",
+        )
+    record_sensitive_read(
+        session,
+        actor=user,
+        resource_type="technical_assessment",
+        resource_id=assessment.id,
+    )
+    session.commit()
+    return technical_assessment_response(session, assessment, offer)
+
+
+@app.post(
+    "/candidate/interview-prep/assessments/{assessment_id}/answers",
+    response_model=CandidateTechnicalAssessmentResponse,
+    tags=["candidate"],
+)
+async def answer_candidate_technical_assessment_question(
+    assessment_id: str,
+    request: TechnicalAssessmentAnswerRequest,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateTechnicalAssessmentResponse:
+    assessment = session.scalar(
+        select(CandidateTechnicalAssessment).where(
+            CandidateTechnicalAssessment.id == assessment_id,
+            CandidateTechnicalAssessment.candidate_id == user.id,
+        )
+    )
+    if assessment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment could not be found.",
+        )
+    if assessment.status == TechnicalAssessmentStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This assessment is already complete.",
+        )
+    question = next(
+        (
+            item
+            for item in assessment.questions
+            if item.get("id") == request.question_id
+        ),
+        None,
+    )
+    if question is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This question is not part of the assessment.",
+        )
+    existing_answer = session.scalar(
+        select(CandidateTechnicalAssessmentAnswer.id).where(
+            CandidateTechnicalAssessmentAnswer.assessment_id == assessment.id,
+            CandidateTechnicalAssessmentAnswer.question_id == request.question_id,
+        )
+    )
+    if existing_answer is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This question has already been answered.",
+        )
+
+    if is_multiple_choice(question):
+        if request.selected_option_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Select one of the available answer options.",
+            )
+        options = question.get("options")
+        if not isinstance(options, list):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="The assessment question is invalid.",
+            )
+        selected_option = next(
+            (
+                option
+                for option in options
+                if option.get("id") == request.selected_option_id
+            ),
+            None,
+        )
+        if selected_option is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Select one of the available answer options.",
+            )
+        answer = str(selected_option["label"])
+        evaluation = evaluate_objective_answer(question, request.selected_option_id)
+    else:
+        if request.answer is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Enter an answer before submitting.",
+            )
+        answer = request.answer
+        try:
+            evaluation = await evaluate_open_answer(question, answer)
+        except AssistantServiceError as error:
+            raise HTTPException(
+                status_code=error.status_code,
+                detail=str(error),
+            ) from error
+
+    session.add(
+        CandidateTechnicalAssessmentAnswer(
+            assessment_id=assessment.id,
+            question_id=request.question_id,
+            answer=answer,
+            evaluation=evaluation,
+        )
+    )
+    session.flush()
+    question_count = len(assessment.questions)
+    answer_count = len(
+        list(
+            session.scalars(
+                select(CandidateTechnicalAssessmentAnswer.id).where(
+                    CandidateTechnicalAssessmentAnswer.assessment_id == assessment.id
+                )
+            )
+        )
+    )
+    if answer_count == question_count:
+        assessment.status = TechnicalAssessmentStatus.COMPLETED
+    record_audit_event(
+        session,
+        action="candidate.technical_assessment.answer.submitted",
+        actor=user,
+        resource_type="technical_assessment",
+        resource_id=assessment.id,
+        details={
+            "question_id": request.question_id,
+            "evaluation_method": evaluation["method"],
+            "completed": assessment.status == TechnicalAssessmentStatus.COMPLETED,
+        },
+    )
+    session.commit()
+    offer = session.get(JobOffer, assessment.job_offer_id)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment's job offer could not be found.",
+        )
+    return technical_assessment_response(session, assessment, offer)
+
+
+def technical_assessment_response(
+    session: Session,
+    assessment: CandidateTechnicalAssessment,
+    offer: JobOffer,
+) -> CandidateTechnicalAssessmentResponse:
+    answers = session.scalars(
+        select(CandidateTechnicalAssessmentAnswer)
+        .where(CandidateTechnicalAssessmentAnswer.assessment_id == assessment.id)
+        .order_by(CandidateTechnicalAssessmentAnswer.created_at)
+    )
+    return CandidateTechnicalAssessmentResponse(
+        id=assessment.id,
+        offer_id=offer.id,
+        offer_title=offer.title,
+        skill=assessment.skill,
+        status=assessment.status.value,
+        questions=[public_question(question) for question in assessment.questions],
+        answers=[
+            {
+                "question_id": answer.question_id,
+                "answer": answer.answer,
+                "evaluation": answer.evaluation,
+                "created_at": answer.created_at,
+            }
+            for answer in answers
+        ],
+        created_at=assessment.created_at,
+        updated_at=assessment.updated_at,
+    )
+
+
+@app.post(
+    "/candidate/interview-prep/behavioral-assessments",
+    response_model=CandidateBehavioralAssessmentResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["candidate"],
+)
+def start_candidate_behavioral_assessment(
+    request: TechnicalAssessmentStartRequest,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateBehavioralAssessmentResponse:
+    offer = session.get(JobOffer, request.offer_id)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This job offer could not be found.",
+        )
+    competency = get_behavioral_competency(request.skill)
+    if competency is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This is not a supported behavioral competency.",
+        )
+    assessment = CandidateBehavioralAssessment(
+        candidate_id=user.id,
+        job_offer_id=offer.id,
+        competency_id=competency.id,
+        competency_name=competency.name,
+        questions=generate_behavioral_questions(competency.id),
+        status=BehavioralAssessmentStatus.IN_PROGRESS,
+    )
+    session.add(assessment)
+    record_audit_event(
+        session,
+        action="candidate.behavioral_assessment.started",
+        actor=user,
+        resource_type="behavioral_assessment",
+        details={"question_count": 2},
+    )
+    session.commit()
+    session.refresh(assessment)
+    return behavioral_assessment_response(session, assessment, offer)
+
+
+@app.get(
+    "/candidate/interview-prep/behavioral-assessments/{assessment_id}",
+    response_model=CandidateBehavioralAssessmentResponse,
+    tags=["candidate"],
+)
+def get_candidate_behavioral_assessment(
+    assessment_id: str,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateBehavioralAssessmentResponse:
+    assessment = session.scalar(
+        select(CandidateBehavioralAssessment).where(
+            CandidateBehavioralAssessment.id == assessment_id,
+            CandidateBehavioralAssessment.candidate_id == user.id,
+        )
+    )
+    if assessment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This behavioral assessment could not be found.",
+        )
+    offer = session.get(JobOffer, assessment.job_offer_id)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment's job offer could not be found.",
+        )
+    record_sensitive_read(
+        session,
+        actor=user,
+        resource_type="behavioral_assessment",
+        resource_id=assessment.id,
+    )
+    session.commit()
+    return behavioral_assessment_response(session, assessment, offer)
+
+
+@app.post(
+    "/candidate/interview-prep/behavioral-assessments/{assessment_id}/answers",
+    response_model=CandidateBehavioralAssessmentResponse,
+    tags=["candidate"],
+)
+async def answer_candidate_behavioral_assessment_question(
+    assessment_id: str,
+    request: TechnicalAssessmentAnswerRequest,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateBehavioralAssessmentResponse:
+    if request.selected_option_id is not None or request.answer is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Provide a text answer for this behavioral question.",
+        )
+    assessment = session.scalar(
+        select(CandidateBehavioralAssessment).where(
+            CandidateBehavioralAssessment.id == assessment_id,
+            CandidateBehavioralAssessment.candidate_id == user.id,
+        )
+    )
+    if assessment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This behavioral assessment could not be found.",
+        )
+    if assessment.status == BehavioralAssessmentStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This behavioral assessment is already complete.",
+        )
+    question = next(
+        (item for item in assessment.questions if item.get("id") == request.question_id),
+        None,
+    )
+    if question is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This question is not part of the behavioral assessment.",
+        )
+    existing_answer = session.scalar(
+        select(CandidateBehavioralAssessmentAnswer.id).where(
+            CandidateBehavioralAssessmentAnswer.assessment_id == assessment.id,
+            CandidateBehavioralAssessmentAnswer.question_id == request.question_id,
+        )
+    )
+    if existing_answer is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This behavioral question has already been answered.",
+        )
+    try:
+        evaluation = await evaluate_behavioral_answer(question, request.answer)
+    except AssistantServiceError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=str(error),
+        ) from error
+
+    session.add(
+        CandidateBehavioralAssessmentAnswer(
+            assessment_id=assessment.id,
+            question_id=request.question_id,
+            answer=request.answer,
+            evaluation=evaluation,
+        )
+    )
+    session.flush()
+    answer_count = len(
+        list(
+            session.scalars(
+                select(CandidateBehavioralAssessmentAnswer.id).where(
+                    CandidateBehavioralAssessmentAnswer.assessment_id == assessment.id
+                )
+            )
+        )
+    )
+    if answer_count == len(assessment.questions):
+        assessment.status = BehavioralAssessmentStatus.COMPLETED
+    record_audit_event(
+        session,
+        action="candidate.behavioral_assessment.answer.submitted",
+        actor=user,
+        resource_type="behavioral_assessment",
+        resource_id=assessment.id,
+        details={
+            "question_id": request.question_id,
+            "completed": assessment.status == BehavioralAssessmentStatus.COMPLETED,
+        },
+    )
+    session.commit()
+    offer = session.get(JobOffer, assessment.job_offer_id)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment's job offer could not be found.",
+        )
+    return behavioral_assessment_response(session, assessment, offer)
+
+
+def behavioral_assessment_response(
+    session: Session,
+    assessment: CandidateBehavioralAssessment,
+    offer: JobOffer,
+) -> CandidateBehavioralAssessmentResponse:
+    answers = session.scalars(
+        select(CandidateBehavioralAssessmentAnswer)
+        .where(CandidateBehavioralAssessmentAnswer.assessment_id == assessment.id)
+        .order_by(CandidateBehavioralAssessmentAnswer.created_at)
+    )
+    return CandidateBehavioralAssessmentResponse(
+        id=assessment.id,
+        offer_id=offer.id,
+        offer_title=offer.title,
+        competency_id=assessment.competency_id,
+        competency_name=assessment.competency_name,
+        status=assessment.status.value,
+        questions=[
+            public_behavioral_question(question) for question in assessment.questions
+        ],
+        answers=[
+            {
+                "question_id": answer.question_id,
+                "answer": answer.answer,
+                "evaluation": answer.evaluation,
+                "created_at": answer.created_at,
+            }
+            for answer in answers
+        ],
+        created_at=assessment.created_at,
+        updated_at=assessment.updated_at,
+    )
+
+
+@app.post(
+    "/candidate/interview-prep/{assessment_type}-assessments/{assessment_id}"
+    "/questions/{question_id}/transcription",
+    response_model=CandidateInterviewTranscriptionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["candidate"],
+)
+async def upload_candidate_interview_audio(
+    assessment_type: str,
+    assessment_id: str,
+    question_id: str,
+    background_tasks: BackgroundTasks,
+    audio: UploadFile = File(...),
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateInterviewTranscriptionResponse:
+    if assessment_type == "technical":
+        assessment = session.scalar(
+            select(CandidateTechnicalAssessment).where(
+                CandidateTechnicalAssessment.id == assessment_id,
+                CandidateTechnicalAssessment.candidate_id == user.id,
+            )
+        )
+    elif assessment_type == "behavioral":
+        assessment = session.scalar(
+            select(CandidateBehavioralAssessment).where(
+                CandidateBehavioralAssessment.id == assessment_id,
+                CandidateBehavioralAssessment.candidate_id == user.id,
+            )
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment type is not supported.",
+        )
+    if assessment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This assessment could not be found.",
+        )
+    if assessment.status != (
+        TechnicalAssessmentStatus.IN_PROGRESS
+        if assessment_type == "technical"
+        else BehavioralAssessmentStatus.IN_PROGRESS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Audio cannot be added to a completed assessment.",
+        )
+    question_exists = any(item.get("id") == question_id for item in assessment.questions)
+    if not question_exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This question is not part of the assessment.",
+        )
+    content_type = (audio.content_type or "").split(";", maxsplit=1)[0].strip().lower()
+    if not content_type.startswith("audio/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Upload an audio recording to transcribe.",
+        )
+    content = await audio.read(MAX_INTERVIEW_AUDIO_BYTES + 1)
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The audio recording is empty.",
+        )
+    if len(content) > MAX_INTERVIEW_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Audio recordings must be 20 MB or smaller.",
+        )
+
+    transcription = CandidateInterviewTranscription(
+        candidate_id=user.id,
+        assessment_type=assessment_type,
+        assessment_id=assessment.id,
+        question_id=question_id,
+        status=InterviewTranscriptionStatus.QUEUED,
+    )
+    session.add(transcription)
+    record_audit_event(
+        session,
+        action="candidate.interview_transcription.queued",
+        actor=user,
+        resource_type="interview_transcription",
+        details={
+            "assessment_type": assessment_type,
+            "content_type": content_type,
+            "size_bytes": len(content),
+        },
+    )
+    session.commit()
+    session.refresh(transcription)
+    background_tasks.add_task(
+        process_interview_transcription,
+        transcription.id,
+        content,
+        content_type,
+        sessionmaker(bind=session.get_bind(), autoflush=False, expire_on_commit=False),
+    )
+    return interview_transcription_response(transcription)
+
+
+@app.get(
+    "/candidate/interview-prep/transcriptions/{transcription_id}",
+    response_model=CandidateInterviewTranscriptionResponse,
+    tags=["candidate"],
+)
+def get_candidate_interview_transcription(
+    transcription_id: str,
+    user: User = Depends(require_permission(Permission.INTERVIEW_PREP_READ_OWN)),
+    session: Session = Depends(get_session),
+) -> CandidateInterviewTranscriptionResponse:
+    transcription = session.scalar(
+        select(CandidateInterviewTranscription).where(
+            CandidateInterviewTranscription.id == transcription_id,
+            CandidateInterviewTranscription.candidate_id == user.id,
+        )
+    )
+    if transcription is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This transcription could not be found.",
+        )
+    record_sensitive_read(
+        session,
+        actor=user,
+        resource_type="interview_transcription",
+        resource_id=transcription.id,
+    )
+    session.commit()
+    return interview_transcription_response(transcription)
+
+
+def interview_transcription_response(
+    transcription: CandidateInterviewTranscription,
+) -> CandidateInterviewTranscriptionResponse:
+    return CandidateInterviewTranscriptionResponse(
+        id=transcription.id,
+        assessment_type=transcription.assessment_type,
+        assessment_id=transcription.assessment_id,
+        question_id=transcription.question_id,
+        status=transcription.status.value,
+        transcript=transcription.transcript,
+        error_message=transcription.error_message,
+        created_at=transcription.created_at,
+        updated_at=transcription.updated_at,
     )
 
 

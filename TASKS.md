@@ -115,9 +115,40 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
     prioritizing skills requested by more offers.
   - [x] Add candidate progress tracking and a responsive roadmap screen.
   - [x] Add role-restricted API, persistence migration, and regression tests.
-- [ ] Task 9 — Interview preparation and hard/soft skills review.
-  - [ ] Help candidates review role-relevant hard skills and soft skills
-    before interviews.
+- [/] Task 9 — Interview preparation and hard/soft skills review.
+  - [x] Phase 0 — Inspect architecture and identify reusable profile, offer,
+    permission, assistant, training, and frontend components.
+  - [x] Phase 1 — Add a competency catalog, proficiency scale, candidate skill
+    comparison, offer-based role profiles, and clearly labeled behavioral and
+    communication suggestions.
+  - [x] Phase 2 — Generate knowledge, practical, and scenario questions from
+    offer skills; persist candidate-owned sessions, answers, and evaluations.
+    Score objective Python/SQL questions deterministically, validate structured
+    local-assistant feedback for open answers, and keep code execution disabled.
+  - [x] Phase 3 — Add saved behavioral and situational assessment sessions
+    for the supported soft-skill catalog, accept candidate-owned text answers,
+    and provide structured STAR evaluation and improvement feedback without
+    inferring personality or penalizing non-professional experience.
+  - [x] Phase 4 — Capture technical and behavioral interview answers in the
+    browser, asynchronously transcribe them, and let candidates review/edit
+    transcripts before submission. Persist job status and transcript only;
+    validate ownership and audio type/size, and never retain raw audio.
+    Verify recorder/upload/review UI, API ownership and failure states,
+    migration, backend suite (111), frontend suite, and production build.
+  - [x] Phase 5 — Analyze communication signals and provide exercises.
+    Draft interview responses are scored for structure, concrete examples,
+    and result clarity; the UI surfaces a short communication coach and a
+    set of practice exercises. Validate with the interview-prep frontend
+    suite and the production build.
+  - [x] Phase 6 — Orchestrate adaptive mock interviews.
+  - [ ] Phase 7 — Integrate candidate CV evidence.
+  - [ ] Phase 8 — Recommend matching training courses.
+  - [x] Phase 9 — Add reports and progress tracking.
+    Summarize completed technical and behavioral responses into a simple
+    interview-prep report with question counts, score averages, and a
+    progress bar, plus coaching recommendations for the next practice round.
+  - [ ] Phase 10 — Complete end-to-end integration, validation, and
+    optimization.
 - [x] Task 11 — Administration and training-provider dashboards.
 - [ ] Task 6, part 2 — Polish the remaining screens in the brief's order.
 
@@ -130,9 +161,12 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
 - Features not implemented are unavailable; the initial UI uses empty states
   rather than simulated platform data.
 - Latest checks: frontend production build passed; frontend tests passed
-  (32); full API test suite passed (89), including marketplace role/ownership,
-  SQLite migration, roadmap, permissions, and assistant retrieval/routing.
-  The new migration through revision 0007 passed SQLite integration checks
+  (including interview recording and transcript review); full API test suite
+  passed (111), including marketplace role/ownership, SQLite migrations through
+  revision 0010, behavioral and technical assessment persistence and scoring,
+  interview transcription job ownership/failure states, roadmap, permissions,
+  and assistant retrieval/routing. The new migration through revision 0010 passed
+  SQLite integration checks
   and PostgreSQL static SQL generation. PostgreSQL 17 with pgvector was
   migrated through revision 0006; six approved Tunisia/France documents and
   361 384-dimensional chunks were ingested. Live PostgreSQL vector,

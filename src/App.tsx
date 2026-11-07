@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ClipboardList,
   Compass,
+  ClipboardCheck,
   GraduationCap,
   LayoutDashboard,
   LogOut,
@@ -28,6 +29,7 @@ import {
 } from "./marketplace";
 import {
   CandidateAssistantPage,
+  CandidateInterviewPreparationPage,
   CandidateMatchesPage,
   CandidateProfilePage,
   CandidateRoadmapPage,
@@ -59,6 +61,7 @@ const roleConfiguration: Record<
       { label: "Vue d’ensemble", icon: LayoutDashboard },
       { label: "Mes opportunités", icon: BriefcaseBusiness },
       { label: "Mon parcours", icon: Compass },
+      { label: "Préparer un entretien", icon: ClipboardCheck },
       { label: "Formations", icon: GraduationCap },
       { label: "Mes candidatures", icon: ClipboardList },
       { label: "Assistant", icon: MessageCircle },
@@ -362,6 +365,8 @@ export default function App() {
             <CandidateMatchesPage token={accessToken} onNavigate={setActivePage} />
           ) : isCandidate && activePage === "Mon parcours" ? (
             <CandidateRoadmapPage token={accessToken} onNavigate={setActivePage} />
+          ) : isCandidate && activePage === "Préparer un entretien" ? (
+            <CandidateInterviewPreparationPage token={accessToken} onNavigate={setActivePage} />
           ) : isCandidate && activePage === "Assistant" ? (
             <CandidateAssistantPage token={accessToken} onNavigate={setActivePage} />
           ) : isCandidate && activePage === "Formations" ? (

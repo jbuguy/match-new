@@ -153,6 +153,116 @@ export type CandidateRoadmap = {
   progress_percent: number;
 };
 
+export type CandidateInterviewRole = Pick<
+  JobOffer,
+  "id" | "title" | "description" | "location" | "required_skills"
+>;
+
+export type InterviewCompetency = {
+  id: string;
+  name: string;
+  description: string;
+  category: "hard" | "soft" | "communication";
+  associated_skill: string | null;
+  assessment_criteria: string[];
+  required_proficiency_level: number | null;
+  importance_weight: number | null;
+  mandatory: boolean;
+  source: "job_offer" | "platform_guidance";
+  candidate_evidence: "self_reported" | "gap" | "not_assessed";
+};
+
+export type CandidateInterviewPreparationProfile = {
+  role: CandidateInterviewRole;
+  required_competencies: InterviewCompetency[];
+  suggested_competencies: InterviewCompetency[];
+  proficiency_levels: { level: number; name: string; description: string }[];
+};
+
+export type TechnicalAssessmentQuestion = {
+  id: string;
+  type: "knowledge" | "practical" | "scenario";
+  format: "multiple_choice" | "short_answer" | "text_exercise";
+  skill: string;
+  prompt: string;
+  options: { id: string; label: string }[];
+  criteria: { id: string; label: string }[];
+};
+
+export type TechnicalAssessmentEvaluation = {
+  score: number;
+  max_score: number;
+  criteria_scores: {
+    criterion_id: string;
+    label: string;
+    score: number;
+    max_score: number;
+  }[];
+  explanation: string;
+  strengths: string[];
+  weaknesses: string[];
+  suggested_improvements: string[];
+  method: "deterministic" | "llm";
+};
+
+export type CandidateTechnicalAssessment = {
+  id: string;
+  offer_id: string;
+  offer_title: string;
+  skill: string;
+  status: "in_progress" | "completed";
+  questions: TechnicalAssessmentQuestion[];
+  answers: {
+    question_id: string;
+    answer: string;
+    evaluation: TechnicalAssessmentEvaluation;
+    created_at: string;
+  }[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type CandidateBehavioralAssessment = {
+  id: string;
+  offer_id: string;
+  offer_title: string;
+  competency_id: string;
+  competency_name: string;
+  status: "in_progress" | "completed";
+  questions: {
+    id: string;
+    type: "behavioral" | "situational";
+    format: "star_text" | "text_answer";
+    competency_id: string;
+    competency_name: string;
+    prompt: string;
+    criteria: { id: string; label: string }[];
+    star_components: { id: string; label: string }[];
+  }[];
+  answers: {
+    question_id: string;
+    answer: string;
+    evaluation: TechnicalAssessmentEvaluation & {
+      star_scores: Record<string, { score: number; max_score: number; evidence: string }>;
+    };
+    created_at: string;
+  }[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type CandidateInterviewTranscription = {
+  id: string;
+  assessment_type: "technical" | "behavioral";
+  assessment_id: string;
+  question_id: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  transcript: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type LoginResponse = {
   access_token: string;
   user: AuthUser;
@@ -287,6 +397,15 @@ export function updateCandidateProfile(
   });
 }
 
+export function uploadCandidateCv(token: string, file: File): Promise<CandidateProfile> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return authenticatedRequest(token, "/candidate/profile/cv", {
+    method: "POST",
+    body: form,
+  });
+}
+
 export function sendCandidateAssistantMessage(
   token: string,
   messages: CandidateAssistantMessage[],
@@ -383,6 +502,105 @@ export function updateCandidateRoadmapStep(
     method: "PUT",
     body: JSON.stringify({ skill, completed }),
   });
+}
+
+export function fetchCandidateInterviewRoles(
+  token: string,
+): Promise<CandidateInterviewRole[]> {
+  return authenticatedRequest(token, "/candidate/interview-prep/roles");
+}
+
+export function fetchCandidateInterviewPreparationProfile(
+  token: string,
+  offerId: string,
+): Promise<CandidateInterviewPreparationProfile> {
+  return authenticatedRequest(
+    token,
+    `/candidate/interview-prep/profiles/${encodeURIComponent(offerId)}`,
+  );
+}
+
+export function startCandidateTechnicalAssessment(
+  token: string,
+  offerId: string,
+  skill: string,
+): Promise<CandidateTechnicalAssessment> {
+  return authenticatedRequest(token, "/candidate/interview-prep/assessments", {
+    method: "POST",
+    body: JSON.stringify({ offer_id: offerId, skill }),
+  });
+}
+
+export function submitCandidateTechnicalAssessmentAnswer(
+  token: string,
+  assessmentId: string,
+  answer: { question_id: string; answer?: string; selected_option_id?: string },
+): Promise<CandidateTechnicalAssessment> {
+  return authenticatedRequest(
+    token,
+    `/candidate/interview-prep/assessments/${encodeURIComponent(assessmentId)}/answers`,
+    {
+      method: "POST",
+      body: JSON.stringify(answer),
+    },
+  );
+}
+
+export function startCandidateBehavioralAssessment(
+  token: string,
+  offerId: string,
+  competencyId: string,
+): Promise<CandidateBehavioralAssessment> {
+  return authenticatedRequest(token, "/candidate/interview-prep/behavioral-assessments", {
+    method: "POST",
+    body: JSON.stringify({ offer_id: offerId, skill: competencyId }),
+  });
+}
+
+export function submitCandidateBehavioralAssessmentAnswer(
+  token: string,
+  assessmentId: string,
+  questionId: string,
+  answer: string,
+): Promise<CandidateBehavioralAssessment> {
+  return authenticatedRequest(
+    token,
+    `/candidate/interview-prep/behavioral-assessments/${encodeURIComponent(assessmentId)}/answers`,
+    {
+      method: "POST",
+      body: JSON.stringify({ question_id: questionId, answer }),
+    },
+  );
+}
+
+export function uploadCandidateInterviewAudio(
+  token: string,
+  assessmentType: "technical" | "behavioral",
+  assessmentId: string,
+  questionId: string,
+  audio: Blob,
+): Promise<CandidateInterviewTranscription> {
+  const form = new FormData();
+  form.append("audio", audio, "interview-answer.webm");
+  return authenticatedRequest(
+    token,
+    `/candidate/interview-prep/${assessmentType}-assessments/${encodeURIComponent(assessmentId)}` +
+      `/questions/${encodeURIComponent(questionId)}/transcription`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+}
+
+export function fetchCandidateInterviewTranscription(
+  token: string,
+  transcriptionId: string,
+): Promise<CandidateInterviewTranscription> {
+  return authenticatedRequest(
+    token,
+    `/candidate/interview-prep/transcriptions/${encodeURIComponent(transcriptionId)}`,
+  );
 }
 
 export function fetchEmployerOffers(token: string): Promise<JobOffer[]> {
