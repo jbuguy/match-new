@@ -49,6 +49,19 @@ export type JobOffer = {
   created_at: string;
 };
 
+export type OrganisationProfile = {
+  id: string;
+  organisation_type: string;
+  name: string;
+  website: string | null;
+  sector: string | null;
+  size: string | null;
+  description: string | null;
+  phone: string | null;
+  contact_email: string | null;
+  location: string | null;
+};
+
 export type JobMatch = JobOffer & {
   match_score: number;
   matched_skills: string[];
@@ -612,6 +625,20 @@ export function fetchCandidateInterviewTranscription(
 
 export function fetchEmployerOffers(token: string): Promise<JobOffer[]> {
   return authenticatedRequest(token, "/employer/offers");
+}
+
+export function fetchEmployerOrganisation(token: string): Promise<OrganisationProfile> {
+  return authenticatedRequest(token, "/employer/organisation");
+}
+
+export function updateEmployerOrganisation(
+  token: string,
+  profile: Omit<OrganisationProfile, "id" | "organisation_type">,
+): Promise<OrganisationProfile> {
+  return authenticatedRequest(token, "/employer/organisation", {
+    method: "PUT",
+    body: JSON.stringify(profile),
+  });
 }
 
 export function createEmployerOffer(

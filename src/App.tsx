@@ -26,6 +26,7 @@ import {
   CandidateApplicationsPage,
   CandidateCoursesPage,
   EmployerApplicationsPage,
+  EmployerOrganisationPage,
   TrainingProviderDashboardPage,
 } from "./marketplace";
 import {
@@ -382,6 +383,8 @@ export default function App() {
             <EmployerOffersPage token={accessToken} />
           ) : user.role === "employer" && activePage === "Candidatures" ? (
             <EmployerApplicationsPage token={accessToken} />
+          ) : user.role === "employer" && activePage === "Mon organisation" ? (
+            <EmployerOrganisationPage token={accessToken} />
           ) : user.role === "training_provider" && activePage === "Catalogue de formations" ? (
             <TrainingProviderDashboardPage token={accessToken} />
           ) : (

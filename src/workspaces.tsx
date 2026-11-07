@@ -639,6 +639,7 @@ export function CandidateProfilePage({ token }: { token: string }) {
                   value={profile.education}
                   maxLength={5000}
                   multiline
+                  hint="Indiquez le diplôme, l’établissement, le domaine et l’année. Une formation en cours peut aussi être ajoutée."
                   onChange={(value) => setProfile({ ...profile, education: value })}
                 />
                 <ProfileTextField
@@ -646,6 +647,7 @@ export function CandidateProfilePage({ token }: { token: string }) {
                   value={profile.experience}
                   maxLength={5000}
                   multiline
+                  hint="Pour chaque expérience, précisez le poste, l’organisation, la période et vos principales missions ou réalisations."
                   onChange={(value) => setProfile({ ...profile, experience: value })}
                 />
                 <ProfileTextField
@@ -653,9 +655,14 @@ export function CandidateProfilePage({ token }: { token: string }) {
                   value={profile.skills}
                   maxLength={2200}
                   multiline
-                  hint="Séparez les compétences par des virgules."
+                  hint="Ajoutez des compétences concrètes (outils, méthodes ou savoir-faire), séparées par une virgule ou un retour à la ligne."
                   onChange={(value) => setProfile({ ...profile, skills: value })}
                 />
+                <div className="profile-skill-preview" aria-live="polite">
+                  {splitSkills(profile.skills).length ? splitSkills(profile.skills).map((skill) => (
+                    <span key={skill}>{skill}</span>
+                  )) : <p>Vos compétences ajoutées apparaîtront ici.</p>}
+                </div>
                 {error && <p className="workspace-error" role="alert">{error}</p>}
                 {notice && <p className="workspace-success" role="status">{notice}</p>}
                 <Button type="submit" disabled={isSaving}>
@@ -787,6 +794,7 @@ function ProfileTextField({
         <textarea
           className="input workspace-textarea workspace-textarea--short"
           aria-label={label}
+          rows={multiline ? 5 : undefined}
           value={value}
           maxLength={maxLength}
           onChange={(event) => onChange(event.target.value)}
@@ -2288,6 +2296,19 @@ function MatchCard({
         </Badge>
       </div>
       <p className="offer-card__description">{match.description}</p>
+      <div className="job-match-summary" aria-label="Résumé de la correspondance">
+        <span><strong>{match.matched_skills.length}</strong> compétence{match.matched_skills.length === 1 ? "" : "s"} correspondante{match.matched_skills.length === 1 ? "" : "s"}</span>
+        <span><strong>{match.missing_skills.length}</strong> à développer</span>
+      </div>
+      <details className="job-detail">
+        <summary>Voir le détail de l’offre et des compétences</summary>
+        <div className="job-detail__content">
+          <p><strong>Lieu :</strong> {match.location}</p>
+          <p><strong>Publiée le :</strong> {new Date(match.created_at).toLocaleDateString("fr-FR")}</p>
+          <SkillList label="Compétences requises" skills={match.required_skills} tone="matched" />
+          <p className="market-footnote">Le score compare les compétences indiquées dans votre profil à celles de l’offre. Il ne prédit pas la décision de recrutement.</p>
+        </div>
+      </details>
       <SkillList label="Compétences correspondantes" skills={match.matched_skills} tone="matched" />
       <SkillList label="À développer" skills={match.missing_skills} tone="missing" />
       {error && <p className="workspace-error" role="alert">{error}</p>}

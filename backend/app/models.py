@@ -108,6 +108,13 @@ class Organisation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sector: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    size: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(3000), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(200), nullable=True)
     organisation_type: Mapped[OrganisationType] = mapped_column(
         SqlEnum(
             OrganisationType,

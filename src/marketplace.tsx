@@ -8,11 +8,14 @@ import {
   fetchCandidateApplications,
   fetchCandidateEnrollments,
   fetchEmployerApplications,
+  fetchEmployerOffers,
+  fetchEmployerOrganisation,
   fetchProviderCourseEnrollments,
   fetchPublishedCourses,
   fetchTrainingCourses,
   updateCourseEnrollmentStatus,
   updateEmployerApplicationStatus,
+  updateEmployerOrganisation,
   updateTrainingCourse,
   type AdminIndicators,
   type CourseDeliveryMode,
@@ -21,6 +24,7 @@ import {
   type EmployerApplication,
   type JobApplication,
   type JobApplicationStatus,
+  type OrganisationProfile,
   type ProviderCourseEnrollment,
   type TrainingCourse,
   type TrainingCourseDraft,
@@ -121,6 +125,18 @@ export function AdminDashboardPage({ token }: { token: string }) {
         Suivez l’activité, les compétences demandées et les résultats déclarés par les employeurs.
         Les données présentées sont agrégées et ne contiennent pas de profils individuels.
       </p>
+
+      <div className="admin-overview-banner">
+        <div className="admin-overview-banner__copy">
+          <span className="admin-overview-banner__eyebrow">INDICATEURS DE LA PLATEFORME</span>
+          <h2>Un aperçu de l’activité emploi et formation</h2>
+          <p>Les chiffres et graphiques ci-dessous reflètent les données agrégées de la période sélectionnée.</p>
+        </div>
+        <div className="admin-overview-banner__visual" aria-hidden="true">
+          <span /><span /><span /><span /><span /><span /><span />
+          <i className="admin-overview-banner__line" />
+        </div>
+      </div>
 
       <form className="market-filter" onSubmit={applyDateRange}>
         <label className="form-field">
@@ -894,6 +910,108 @@ export function EmployerApplicationsPage({ token }: { token: string }) {
           );
         })}
       </div>
+    </section>
+  );
+}
+
+export function EmployerOrganisationPage({ token }: { token: string }) {
+  const [offers, setOffers] = useState<import("./auth").JobOffer[]>([]);
+  const [applications, setApplications] = useState<EmployerApplication[]>([]);
+  const [profile, setProfile] = useState<OrganisationProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchEmployerOffers(token), fetchEmployerApplications(token), fetchEmployerOrganisation(token)])
+      .then(([offerRows, applicationRows, organisation]) => {
+        if (cancelled) return;
+        setOffers(offerRows);
+        setApplications(applicationRows);
+        setProfile(organisation);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(errorMessage(cause));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const activeApplications = applications.filter((item) => !["hired", "rejected"].includes(item.status)).length;
+  const hiredApplications = applications.filter((item) => item.status === "hired").length;
+
+  async function saveOrganisation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profile) return;
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await updateEmployerOrganisation(token, {
+        name: profile.name,
+        website: profile.website,
+        sector: profile.sector,
+        size: profile.size,
+        description: profile.description,
+        phone: profile.phone,
+        contact_email: profile.contact_email,
+        location: profile.location,
+      });
+      setProfile(saved);
+      setNotice("Les informations de votre organisation ont été enregistrées.");
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="market-page">
+      <div className="eyebrow">ESPACE EMPLOYEUR</div>
+      <h1>Mon organisation</h1>
+      <p className="market-page__intro">Retrouvez ici l’activité de recrutement liée à votre compte, à partir de vos offres et candidatures enregistrées.</p>
+      {error && <p className="workspace-error" role="alert">{error}</p>}
+      {isLoading ? <p aria-live="polite">Chargement de votre activité…</p> : (
+        <>
+          {profile && <Card className="market-panel">
+            <div className="market-section-heading"><div><h2>Informations de l’organisation</h2><p>Ces informations présentent votre structure aux candidats.</p></div><Badge>Profil entreprise</Badge></div>
+            <form className="workspace-form organisation-form" onSubmit={(event) => void saveOrganisation(event)}>
+              <label className="form-field"><span className="form-field__label">Nom de l’organisation</span><input className="input" required minLength={2} maxLength={200} value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></label>
+              <label className="form-field"><span className="form-field__label">Site web</span><input className="input" type="url" placeholder="https://exemple.tn" maxLength={500} value={profile.website ?? ""} onChange={(event) => setProfile({ ...profile, website: event.target.value || null })} /></label>
+              <label className="form-field"><span className="form-field__label">Secteur d’activité</span><input className="input" maxLength={120} placeholder="Ex. technologies, santé, industrie" value={profile.sector ?? ""} onChange={(event) => setProfile({ ...profile, sector: event.target.value || null })} /></label>
+              <label className="form-field"><span className="form-field__label">Taille de l’organisation</span><select className="select" value={profile.size ?? ""} onChange={(event) => setProfile({ ...profile, size: event.target.value || null })}><option value="">Sélectionner</option><option value="1-10">1 à 10 personnes</option><option value="11-50">11 à 50 personnes</option><option value="51-200">51 à 200 personnes</option><option value="201-500">201 à 500 personnes</option><option value="500+">Plus de 500 personnes</option></select></label>
+              <label className="form-field"><span className="form-field__label">Ville / adresse</span><input className="input" maxLength={200} value={profile.location ?? ""} onChange={(event) => setProfile({ ...profile, location: event.target.value || null })} /></label>
+              <label className="form-field"><span className="form-field__label">Téléphone de contact</span><input className="input" type="tel" maxLength={40} value={profile.phone ?? ""} onChange={(event) => setProfile({ ...profile, phone: event.target.value || null })} /></label>
+              <label className="form-field"><span className="form-field__label">E-mail de contact</span><input className="input" type="email" maxLength={320} value={profile.contact_email ?? ""} onChange={(event) => setProfile({ ...profile, contact_email: event.target.value || null })} /></label>
+              <label className="form-field organisation-form__wide"><span className="form-field__label">À propos</span><textarea className="input workspace-textarea" maxLength={3000} rows={4} placeholder="Présentez votre activité, vos missions et votre environnement de travail." value={profile.description ?? ""} onChange={(event) => setProfile({ ...profile, description: event.target.value || null })} /></label>
+              {notice && <p className="workspace-success" role="status">{notice}</p>}
+              <Button type="submit" disabled={isSaving}>{isSaving ? "Enregistrement…" : "Enregistrer les informations"}</Button>
+            </form>
+          </Card>}
+          <div className="market-metrics market-metrics--three">
+            <MetricCard label="Offres publiées" value={offers.length} detail="Offres associées à votre compte" />
+            <MetricCard label="Candidatures à traiter" value={activeApplications} detail="Reçues, à l’étude ou en entretien" />
+            <MetricCard label="Recrutements déclarés" value={hiredApplications} detail="Candidatures marquées comme recrutées" />
+          </div>
+          <Card className="market-panel">
+            <div className="market-section-heading"><div><h2>Offres de l’organisation</h2><p>Postes actuellement enregistrés sur votre espace.</p></div><Badge>{offers.length}</Badge></div>
+            {offers.length ? <div className="market-list">
+              {offers.map((offer) => {
+                const count = applications.filter((item) => item.job_offer_id === offer.id).length;
+                return <article className="market-org-offer" key={offer.id}>
+                  <div><h3>{offer.title}</h3><p>{offer.location} · Publiée le {formatDate(offer.created_at)}</p></div>
+                  <Badge>{count} candidature{count === 1 ? "" : "s"}</Badge>
+                </article>;
+              })}
+            </div> : <EmptyState title="Aucune offre enregistrée" description="Publiez une offre depuis « Mes offres » pour commencer à suivre votre recrutement." />}
+          </Card>
+        </>
+      )}
     </section>
   );
 }

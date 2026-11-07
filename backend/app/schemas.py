@@ -63,6 +63,40 @@ class UserResponse(BaseModel):
     role: Role
 
 
+class OrganisationProfileUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    website: str | None = Field(default=None, max_length=500)
+    sector: str | None = Field(default=None, max_length=120)
+    size: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=3000)
+    phone: str | None = Field(default=None, max_length=40)
+    contact_email: str | None = Field(default=None, max_length=320)
+    location: str | None = Field(default=None, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def reject_blank_name(cls, value: str) -> str:
+        clean = value.strip()
+        if len(clean) < 2:
+            raise ValueError("Organisation name must contain at least two characters.")
+        return clean
+
+    @field_validator("website")
+    @classmethod
+    def validate_website(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        clean = value.strip()
+        if not clean.startswith(("https://", "http://")):
+            raise ValueError("Website must start with http:// or https://.")
+        return clean
+
+
+class OrganisationProfileResponse(OrganisationProfileUpdate):
+    id: str
+    organisation_type: str
+
+
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

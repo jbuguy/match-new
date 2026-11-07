@@ -60,6 +60,9 @@ from app.models import (
     BehavioralAssessmentStatus,
     InterviewTranscriptionStatus,
     JobOffer,
+    Organisation,
+    OrganisationMembership,
+    OrganisationType,
     Role,
     TechnicalAssessmentStatus,
     User,
@@ -94,6 +97,8 @@ from app.schemas import (
     JobOfferResponse,
     LoginRequest,
     LoginResponse,
+    OrganisationProfileResponse,
+    OrganisationProfileUpdate,
     UserResponse,
 )
 from app.technical_assessment import (
@@ -139,6 +144,70 @@ app.add_middleware(
     allow_methods=["DELETE", "GET", "PATCH", "POST", "PUT"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+def _employer_organisation(user: User, session: Session) -> Organisation:
+    organisation = session.scalar(
+        select(Organisation)
+        .join(OrganisationMembership, OrganisationMembership.organisation_id == Organisation.id)
+        .where(
+            OrganisationMembership.user_id == user.id,
+            Organisation.organisation_type == OrganisationType.EMPLOYER,
+        )
+        .order_by(Organisation.created_at, Organisation.id)
+    )
+    if organisation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No employer organisation is linked to this account.",
+        )
+    return organisation
+
+
+@app.get(
+    "/employer/organisation",
+    response_model=OrganisationProfileResponse,
+    tags=["employer"],
+)
+def get_employer_organisation(
+    user: User = Depends(require_role(Role.EMPLOYER)),
+    session: Session = Depends(get_session),
+) -> OrganisationProfileResponse:
+    organisation = _employer_organisation(user, session)
+    return OrganisationProfileResponse.model_validate({
+        **{field: getattr(organisation, field) for field in OrganisationProfileUpdate.model_fields},
+        "id": organisation.id,
+        "organisation_type": organisation.organisation_type.value,
+    })
+
+
+@app.put(
+    "/employer/organisation",
+    response_model=OrganisationProfileResponse,
+    tags=["employer"],
+)
+def update_employer_organisation(
+    request: OrganisationProfileUpdate,
+    user: User = Depends(require_role(Role.EMPLOYER)),
+    session: Session = Depends(get_session),
+) -> OrganisationProfileResponse:
+    organisation = _employer_organisation(user, session)
+    for field, value in request.model_dump().items():
+        setattr(organisation, field, value.strip() if isinstance(value, str) else value)
+    record_audit_event(
+        session,
+        action="employer.organisation.updated",
+        actor=user,
+        resource_type="organisation",
+        resource_id=organisation.id,
+    )
+    session.commit()
+    session.refresh(organisation)
+    return OrganisationProfileResponse.model_validate({
+        **{field: getattr(organisation, field) for field in OrganisationProfileUpdate.model_fields},
+        "id": organisation.id,
+        "organisation_type": organisation.organisation_type.value,
+    })
 
 
 @app.get("/health/live", tags=["health"])
