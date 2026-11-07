@@ -448,6 +448,13 @@ export function sendCandidateAssistantSessionMessage(
   });
 }
 
+export function renameCandidateAssistantSession(token: string, sessionId: string, title: string): Promise<CandidateAssistantSession> {
+  return authenticatedRequest(token, `/candidate/assistant/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
 export async function deleteCandidateAssistantSession(
   token: string,
   sessionId: string,

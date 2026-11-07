@@ -203,6 +203,18 @@ class CandidateAssistantMessageRequest(BaseModel):
         return clean
 
 
+class CandidateAssistantSessionRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def trim_title(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("Conversation title cannot be blank.")
+        return clean
+
+
 class JobOfferCreate(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     description: str = Field(min_length=10, max_length=5000)

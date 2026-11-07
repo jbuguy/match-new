@@ -102,12 +102,49 @@ def test_chat_sessions_are_candidate_owned_and_deletable(
     ) is None
 
 
-def test_chat_sessions_are_candidate_only(
+def test_chat_sessions_are_available_to_every_authenticated_role(
     client: TestClient,
     users: dict[Role, User],
 ) -> None:
-    response = client.get(
-        "/candidate/assistant/sessions",
-        headers=auth_headers(users[Role.EMPLOYER]),
+    for user in users.values():
+        headers = auth_headers(user)
+        created = client.post("/candidate/assistant/sessions", headers=headers)
+        assert created.status_code == 201
+        assert created.json()["id"]
+        listed = client.get("/candidate/assistant/sessions", headers=headers)
+        assert listed.status_code == 200
+        assert listed.json()[0]["id"] == created.json()["id"]
+
+
+def test_rename_is_owner_scoped_and_patch_preflight_is_allowed(
+    client: TestClient,
+    users: dict[Role, User],
+) -> None:
+    owner_headers = auth_headers(users[Role.EMPLOYER])
+    other_headers = auth_headers(users[Role.TRAINING_PROVIDER])
+    created = client.post("/candidate/assistant/sessions", headers=owner_headers)
+    session_id = created.json()["id"]
+
+    renamed = client.patch(
+        f"/candidate/assistant/sessions/{session_id}",
+        headers=owner_headers,
+        json={"title": "Employer help"},
     )
-    assert response.status_code == 403
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Employer help"
+    assert client.patch(
+        f"/candidate/assistant/sessions/{session_id}",
+        headers=other_headers,
+        json={"title": "Take over"},
+    ).status_code == 404
+
+    preflight = client.options(
+        f"/candidate/assistant/sessions/{session_id}",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert "PATCH" in preflight.headers["access-control-allow-methods"]

@@ -102,7 +102,9 @@ that the process responds, not database readiness. Candidate registration is
 at `POST /auth/register`, sign-in is at `POST /auth/login`, and `GET /auth/me`
 returns the authenticated user's server-side role. Set `VITE_API_BASE_URL`
 when the API is not at `http://127.0.0.1:8000`. Candidates can read and update
-their full profile at `/candidate/profile`, chat with the profile assistant at
+their full profile at `/candidate/profile`, upload a CV for AI-assisted
+profile extraction at `POST /candidate/profile/cv`, review and edit the
+extracted values before saving, chat with the profile assistant at
 `POST /candidate/assistant/chat`, transcribe voice at
 `POST /candidate/assistant/transcriptions`, and request spoken replies at
 `POST /candidate/assistant/speech`. Career assistant sessions can be listed,
@@ -110,8 +112,7 @@ created, read, and deleted at `/candidate/assistant/sessions`; send a message
 to a session at `POST /candidate/assistant/sessions/{session_id}/messages`.
 Candidates can read offer matches at `GET /candidate/matches` and list
 interview-preparation targets at `GET /candidate/interview-prep/roles`. Read an
-offer-based competency profile at
-`GET /candidate/interview-prep/profiles/{offer_id}`. Requirements come from
+offer-based competency profile at`GET /candidate/interview-prep/profiles/{offer_id}`. Requirements come from
 that employer offer; generic behavioral prompts are suggestions and do not
 assert employer requirements. Start a technical assessment for an offer skill
 with `POST /candidate/interview-prep/assessments`, read the candidate-owned

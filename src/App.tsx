@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { Badge, Button, Card, ProgressBar } from "./components/ui";
+import { FloatingAssistant } from "./components/FloatingAssistant";
 import {
   AdminDashboardPage,
   CandidateApplicationsPage,
@@ -34,7 +35,6 @@ import {
   CandidateProfilePage,
   CandidateRoadmapPage,
   EmployerOffersPage,
-  RoleAssistant,
 } from "./workspaces";
 import {
   ApiError,
@@ -84,7 +84,10 @@ const roleConfiguration: Record<
   },
   ministry_admin: {
     label: "Administration",
-    navigation: [{ label: "Vue d’ensemble", icon: LayoutDashboard }],
+    navigation: [
+      { label: "Vue d’ensemble", icon: LayoutDashboard },
+      { label: "Assistant", icon: MessageCircle },
+    ],
     dashboardTitle: "Espace administration",
     dashboardDescription: "Suivez les indicateurs agrégés de la plateforme et les résultats déclarés.",
   },
@@ -93,6 +96,7 @@ const roleConfiguration: Record<
     navigation: [
       { label: "Vue d’ensemble", icon: LayoutDashboard },
       { label: "Catalogue de formations", icon: GraduationCap },
+      { label: "Assistant", icon: MessageCircle },
     ],
     dashboardTitle: "Espace organisme de formation",
     dashboardDescription: "Gérez votre catalogue de formations liées aux compétences validées.",
@@ -103,6 +107,7 @@ const roleConfiguration: Record<
       { label: "Vue d’ensemble", icon: LayoutDashboard },
       { label: "Services", icon: Settings2 },
       { label: "Journaux d’audit", icon: ClipboardList },
+      { label: "Assistant", icon: MessageCircle },
     ],
     dashboardTitle: "Espace opérations",
     dashboardDescription: "Suivez les services et journaux sans accéder aux données personnelles.",
@@ -367,8 +372,8 @@ export default function App() {
             <CandidateRoadmapPage token={accessToken} onNavigate={setActivePage} />
           ) : isCandidate && activePage === "Préparer un entretien" ? (
             <CandidateInterviewPreparationPage token={accessToken} onNavigate={setActivePage} />
-          ) : isCandidate && activePage === "Assistant" ? (
-            <CandidateAssistantPage token={accessToken} onNavigate={setActivePage} />
+          ) : activePage === "Assistant" ? (
+            <CandidateAssistantPage token={accessToken} onNavigate={setActivePage} role={user.role} />
           ) : isCandidate && activePage === "Formations" ? (
             <CandidateCoursesPage token={accessToken} />
           ) : isCandidate && activePage === "Mes candidatures" ? (
@@ -377,8 +382,6 @@ export default function App() {
             <EmployerOffersPage token={accessToken} />
           ) : user.role === "employer" && activePage === "Candidatures" ? (
             <EmployerApplicationsPage token={accessToken} />
-          ) : user.role === "employer" && activePage === "Assistant" ? (
-            <RoleAssistant role="employer" onNavigate={setActivePage} />
           ) : user.role === "training_provider" && activePage === "Catalogue de formations" ? (
             <TrainingProviderDashboardPage token={accessToken} />
           ) : (
@@ -397,6 +400,7 @@ export default function App() {
           )}
         </div>
       </main>
+      <FloatingAssistant token={accessToken} onExpand={() => setActivePage("Assistant")} />
     </div>
   );
 }

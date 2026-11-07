@@ -8,6 +8,7 @@ import {
   MessagesSquare,
   Mic,
   Plus,
+  Search,
   Send,
   Sparkles,
   Square,
@@ -38,6 +39,7 @@ import {
   fetchEmployerOffers,
   sendCandidateAssistantMessage,
   sendCandidateAssistantSessionMessage,
+  renameCandidateAssistantSession,
   synthesizeCandidateSpeech,
   transcribeCandidateAudio,
   updateCandidateRoadmapStep,
@@ -51,6 +53,7 @@ import {
   type CandidateInterviewRole,
   type CandidateTechnicalAssessment,
   type CandidateBehavioralAssessment,
+  type Role,
   type TechnicalAssessmentQuestion,
   type CandidateRoadmap,
   type JobMatch,
@@ -266,6 +269,9 @@ export function CandidateProfilePage({ token }: { token: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingCv, setIsUploadingCv] = useState(false);
+  const [cvDraft, setCvDraft] = useState<CandidateProfileForm | null>(null);
+  const [cvFilename, setCvFilename] = useState("");
+  const [cvError, setCvError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [messages, setMessages] = useState<CandidateAssistantMessage[]>([
@@ -283,6 +289,15 @@ export function CandidateProfilePage({ token }: { token: string }) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const cvDialogRef = useRef<HTMLDialogElement | null>(null);
+  const cvFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const dialog = cvDialogRef.current;
+    if (!cvDraft || !dialog || dialog.open) return;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }, [cvDraft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -346,8 +361,45 @@ export function CandidateProfilePage({ token }: { token: string }) {
     setIsUploadingCv(true);
     setError("");
     setNotice("");
+    setCvError("");
     try {
-      const saved = await uploadCandidateCv(token, file);
+      const extracted = await uploadCandidateCv(token, file);
+      setCvDraft({
+        full_name: extracted.full_name ?? "",
+        phone: extracted.phone ?? "",
+        location: extracted.location ?? "",
+        education: extracted.education ?? "",
+        experience: extracted.experience ?? "",
+        skills: extracted.skills.join(", "),
+      });
+      setCvFilename(file.name);
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setIsUploadingCv(false);
+      event.target.value = "";
+    }
+  }
+
+  function updateCvDraft(field: keyof CandidateProfileForm, value: string) {
+    setCvDraft((current) => current ? { ...current, [field]: value } : current);
+  }
+
+  async function saveCvDraft() {
+    if (!cvDraft || isSaving) return;
+    setIsSaving(true);
+    setCvError("");
+    setError("");
+    setNotice("");
+    try {
+      const saved = await updateCandidateProfile(token, {
+        full_name: cvDraft.full_name,
+        phone: cvDraft.phone,
+        location: cvDraft.location,
+        education: cvDraft.education,
+        experience: cvDraft.experience,
+        skills: splitSkills(cvDraft.skills),
+      });
       setProfile({
         full_name: saved.full_name ?? "",
         phone: saved.phone ?? "",
@@ -356,13 +408,18 @@ export function CandidateProfilePage({ token }: { token: string }) {
         experience: saved.experience ?? "",
         skills: saved.skills.join(", "),
       });
-      setNotice(`Profil extrait depuis ${file.name}. Vérifiez les informations avant d’enregistrer.`);
+      setCvDraft(null);
+      setNotice("Votre profil extrait du CV a été enregistré.");
     } catch (cause: unknown) {
-      setError(errorMessage(cause));
+      setCvError(errorMessage(cause));
     } finally {
-      setIsUploadingCv(false);
-      event.target.value = "";
+      setIsSaving(false);
     }
+  }
+
+  function discardCvDraft() {
+    setCvDraft(null);
+    setCvError("");
   }
 
   async function sendMessage(text = chatText) {
@@ -469,9 +526,9 @@ export function CandidateProfilePage({ token }: { token: string }) {
   return (
     <section className="workspace-page">
       <div className="eyebrow">VOTRE PROFIL</div>
-      <h1>Complétez votre profil avec l’assistant</h1>
+      <h1>Mon profil professionnel</h1>
       <p className="workspace-page__intro">
-        Répondez à votre rythme, par écrit ou à la voix. Vérifiez et modifiez chaque information avant de l’enregistrer.
+        Vérifiez vos informations et complétez les détails de votre parcours à votre rythme.
       </p>
       <Card className="workspace-panel">
         {isLoading ? (
@@ -482,8 +539,8 @@ export function CandidateProfilePage({ token }: { token: string }) {
               <div className="assistant-workspace__heading">
                 <span className="assistant-workspace__icon"><Sparkles size={20} aria-hidden="true" /></span>
                 <div>
-                  <h2>Parlons de votre parcours</h2>
-                  <p>L’assistant comprend le Derja tunisien, l’arabe et le français.</p>
+                  <h2>Votre assistant profil</h2>
+                  <p>Parlez en Derja tunisien, en arabe ou en français de vos compétences, études et expériences. Vous vérifierez chaque suggestion avant de l’enregistrer.</p>
                 </div>
               </div>
               <div className="profile-assistant__messages" aria-live="polite" aria-label="Conversation avec l’assistant">
@@ -536,20 +593,23 @@ export function CandidateProfilePage({ token }: { token: string }) {
               </p>
             </div>
             <div className="workspace-form profile-editor">
-              <div className="profile-upload" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+              <div className="profile-upload">
                 <div>
-                  <h2 style={{ margin: 0 }}>Vérifiez vos informations</h2>
-                  <p style={{ margin: "6px 0 0", color: "#475467" }}>Importez votre CV pour préremplir le profil.</p>
+                  <h2>Mon profil</h2>
+                  <p>Importez un CV pour extraire les informations à vérifier.</p>
                 </div>
                 <div>
                   <input
                     id="candidate-cv-upload"
+                    ref={cvFileInputRef}
                     type="file"
                     accept=".pdf,.docx,.txt,.md"
-                    hidden
+                    className="cv-file-input"
+                    aria-label="Sélectionner un CV"
+                    tabIndex={-1}
                     onChange={(event) => void handleCvUpload(event)}
                   />
-                  <Button type="button" variant="secondary" disabled={isUploadingCv} onClick={() => document.getElementById("candidate-cv-upload")?.click()}>
+                  <Button type="button" variant="secondary" disabled={isUploadingCv} onClick={() => cvFileInputRef.current?.click()}>
                     {isUploadingCv ? "Analyse du CV…" : "Importer un CV"}
                   </Button>
                 </div>
@@ -606,6 +666,86 @@ export function CandidateProfilePage({ token }: { token: string }) {
           </>
         )}
       </Card>
+      {cvDraft && (
+        <dialog
+          ref={cvDialogRef}
+          className="cv-review-dialog"
+          aria-labelledby="cv-review-title"
+          onCancel={(event) => {
+            event.preventDefault();
+            discardCvDraft();
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) discardCvDraft();
+          }}
+        >
+          <div className="cv-review-dialog__content">
+            <header className="cv-review-dialog__header">
+              <div>
+                <div className="eyebrow">VÉRIFICATION DU CV</div>
+                <h2 id="cv-review-title">Vérifiez les informations extraites</h2>
+                <p>
+                  {cvFilename} — corrigez les champs si nécessaire. Rien ne sera enregistré avant votre confirmation.
+                </p>
+              </div>
+              <Button type="button" variant="ghost" aria-label="Fermer la vérification du CV" onClick={discardCvDraft}>
+                ×
+              </Button>
+            </header>
+            <div className="cv-review-dialog__fields">
+              <ProfileTextField
+                label="Nom complet"
+                value={cvDraft.full_name}
+                maxLength={200}
+                onChange={(value) => updateCvDraft("full_name", value)}
+              />
+              <ProfileTextField
+                label="Téléphone"
+                value={cvDraft.phone}
+                maxLength={40}
+                onChange={(value) => updateCvDraft("phone", value)}
+              />
+              <ProfileTextField
+                label="Lieu de résidence"
+                value={cvDraft.location}
+                maxLength={120}
+                onChange={(value) => updateCvDraft("location", value)}
+              />
+              <ProfileTextField
+                label="Études et formations"
+                value={cvDraft.education}
+                maxLength={5000}
+                multiline
+                onChange={(value) => updateCvDraft("education", value)}
+              />
+              <ProfileTextField
+                label="Expérience professionnelle"
+                value={cvDraft.experience}
+                maxLength={5000}
+                multiline
+                onChange={(value) => updateCvDraft("experience", value)}
+              />
+              <ProfileTextField
+                label="Compétences"
+                value={cvDraft.skills}
+                maxLength={2200}
+                multiline
+                hint="Séparez les compétences par des virgules."
+                onChange={(value) => updateCvDraft("skills", value)}
+              />
+            </div>
+            {cvError && <p className="workspace-error" role="alert">{cvError}</p>}
+            <footer className="cv-review-dialog__actions">
+              <Button type="button" variant="secondary" disabled={isSaving} onClick={discardCvDraft}>
+                Ignorer les informations
+              </Button>
+              <Button type="button" disabled={isSaving} onClick={() => void saveCvDraft()}>
+                {isSaving ? "Enregistrement…" : "Enregistrer le profil"}
+              </Button>
+            </footer>
+          </div>
+        </dialog>
+      )}
     </section>
   );
 }
@@ -668,9 +808,11 @@ function ProfileTextField({
 export function CandidateAssistantPage({
   token,
   onNavigate,
+  role,
 }: {
   token: string;
   onNavigate: (page: string) => void;
+  role: Role;
 }) {
   const [sessions, setSessions] = useState<CandidateAssistantSessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState<CandidateAssistantSession | null>(null);
@@ -679,6 +821,7 @@ export function CandidateAssistantPage({
   const [isSending, setIsSending] = useState(false);
   const [isOpening, setIsOpening] = useState(false);
   const [error, setError] = useState("");
+  const [sessionSearch, setSessionSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -687,9 +830,14 @@ export function CandidateAssistantPage({
         const history = await fetchCandidateAssistantSessions(token);
         if (cancelled) return;
         setSessions(history);
-        if (history.length) {
-          const firstSession = await fetchCandidateAssistantSession(token, history[0].id);
-          if (!cancelled) setActiveSession(firstSession);
+        const preferredId = sessionStorage.getItem("mahara-assistant-session");
+        const preferred = history.find((item) => item.id === preferredId) ?? history[0];
+        if (preferred) {
+          const firstSession = await fetchCandidateAssistantSession(token, preferred.id);
+          if (!cancelled) {
+            setActiveSession(firstSession);
+            sessionStorage.setItem("mahara-assistant-session", firstSession.id);
+          }
         } else {
           const created = await createCandidateAssistantSession(token);
           if (!cancelled) {
@@ -715,6 +863,7 @@ export function CandidateAssistantPage({
     try {
       const created = await createCandidateAssistantSession(token);
       setActiveSession(created);
+      sessionStorage.setItem("mahara-assistant-session", created.id);
       setSessions((current) => [created, ...current]);
     } catch (cause: unknown) {
       setError(errorMessage(cause));
@@ -727,7 +876,9 @@ export function CandidateAssistantPage({
     setError("");
     setIsOpening(true);
     try {
-      setActiveSession(await fetchCandidateAssistantSession(token, sessionId));
+      const opened = await fetchCandidateAssistantSession(token, sessionId);
+      setActiveSession(opened);
+      sessionStorage.setItem("mahara-assistant-session", opened.id);
     } catch (cause: unknown) {
       setError(errorMessage(cause));
     } finally {
@@ -748,6 +899,7 @@ export function CandidateAssistantPage({
         content,
       );
       setActiveSession(updated);
+      sessionStorage.setItem("mahara-assistant-session", updated.id);
       setSessions((current) => [
         { id: updated.id, title: updated.title, created_at: updated.created_at, updated_at: updated.updated_at },
         ...current.filter((item) => item.id !== updated.id),
@@ -785,11 +937,12 @@ export function CandidateAssistantPage({
   }
 
   const messages = activeSession?.messages ?? [];
+  const assistantTitle = role === "employer" ? "Votre assistant recrutement" : role === "candidate" ? "Votre assistant carrière" : "Votre assistant Mahara Match";
 
   return (
     <section className="workspace-page">
       <div className="eyebrow">ASSISTANT CARRIÈRE</div>
-      <h1>Votre assistant carrière</h1>
+      <h1>{assistantTitle}</h1>
       <p className="workspace-page__intro">
         Posez vos questions en Derja, en arabe ou en français. Vos conversations sont enregistrées dans votre espace et peuvent être supprimées.
       </p>
@@ -808,11 +961,12 @@ export function CandidateAssistantPage({
               Nouveau
             </Button>
           </div>
+          <label className="assistant-search"><Search size={16} aria-hidden="true"/><input className="input" aria-label="Rechercher une conversation" placeholder="Rechercher" value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)}/></label>
           {isLoading ? (
             <p aria-live="polite">Chargement de vos conversations…</p>
           ) : sessions.length ? (
             <ul className="career-assistant-history__list">
-              {sessions.map((item) => (
+              {sessions.filter((item) => item.title.toLocaleLowerCase().includes(sessionSearch.toLocaleLowerCase())).map((item) => (
                 <li key={item.id}>
                   <button
                     className={`career-assistant-history__item${activeSession?.id === item.id ? " career-assistant-history__item--active" : ""}`}
@@ -823,6 +977,23 @@ export function CandidateAssistantPage({
                   >
                     <MessagesSquare size={16} aria-hidden="true" />
                     <span>{item.title}</span>
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={`Renommer ${item.title}`}
+                    disabled={isOpening || isSending}
+                    onClick={async () => {
+                      const title = window.prompt("Nouveau titre de conversation", item.title)?.trim();
+                      if (!title) return;
+                      try {
+                        const updated = await renameCandidateAssistantSession(token, item.id, title);
+                        setSessions((current) => current.map((entry) => entry.id === item.id ? { ...entry, title: updated.title, updated_at: updated.updated_at } : entry));
+                        if (activeSession?.id === item.id) setActiveSession(updated);
+                      } catch (cause) { setError(errorMessage(cause)); }
+                    }}
+                  >
+                    <span aria-hidden="true">✎</span>
                   </button>
                   <button
                     className="icon-button career-assistant-history__delete"
@@ -869,12 +1040,12 @@ export function CandidateAssistantPage({
           </div>
           {!messages.length && !isLoading && (
             <div className="career-assistant-prompts">
-              <Button type="button" variant="secondary" disabled={isSending || isOpening || isLoading} onClick={() => void sendMessage("Comment obtenir de meilleures correspondances avec mes compétences ?")}>
-                Comment obtenir de meilleures correspondances ?
-              </Button>
-              <Button type="button" variant="secondary" disabled={isSending || isOpening || isLoading} onClick={() => void sendMessage("Quelles compétences puis-je développer pour trouver un emploi ?")}>
-                Quelles compétences développer ?
-              </Button>
+              {(role === "employer"
+                ? ["Comment rédiger une offre claire ?", "Quelles compétences indiquer ?"]
+                : role === "candidate"
+                  ? ["Comment obtenir de meilleures correspondances ?", "Quelles compétences développer pour trouver un emploi ?"]
+                  : ["Comment utiliser mon espace ?", "Aidez-moi à comprendre les indicateurs disponibles."]
+              ).map((prompt) => <Button key={prompt} type="button" variant="secondary" disabled={isSending || isOpening || isLoading} onClick={() => void sendMessage(prompt)}>{prompt}</Button>)}
             </div>
           )}
           <form
@@ -900,14 +1071,14 @@ export function CandidateAssistantPage({
           {error && (
             <p className="career-assistant-error" role="alert">{error}</p>
           )}
-          <Button
+          {role === "candidate" && <Button
             type="button"
             className="career-assistant-manual"
             variant="secondary"
             onClick={() => onNavigate("Mon profil")}
           >
             Compléter mon profil manuellement
-          </Button>
+          </Button>}
           <p className="assistant-disclaimer">
             L’assistant peut se tromper. Vérifiez les informations importantes. Vous pouvez aussi modifier votre profil manuellement.
           </p>
@@ -1517,7 +1688,7 @@ export function CandidateInterviewPreparationPage({
                   </div>
                   <p>{mockInterviewPlan.summary}</p>
                   {mockInterviewPlan.onStart && (
-                    <Button onClick={() => void mockInterviewPlan.onStart()}>
+                    <Button onClick={() => void mockInterviewPlan.onStart?.()}>
                       {mockInterviewPlan.buttonLabel}
                     </Button>
                   )}

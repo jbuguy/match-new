@@ -8,6 +8,15 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
 
 ## Current focus
 
+- [/] Task 12 — Persistent assistant surfaces.
+  - [x] Reuse user-owned assistant sessions for floating and full-page chat;
+    keep the selected conversation across app navigation.
+  - [x] Add a responsive authenticated floating chat for every role, with
+    conversation creation, loading/error states, and a link to the workspace.
+  - [x] Add workspace conversation search, rename, and owner-scoped API access.
+  - [x] Allow PATCH through CORS preflight and verify API session access,
+    rename ownership, preflight, and frontend production build.
+  - [ ] Verify the full assistant navigation flow at desktop and mobile sizes.
 - [x] Task 0 — Fresh-project baseline audit (`docs/AUDIT.md`).
 - [x] Task 6, part 1 — Design tokens, shared components, and responsive app
   shell.

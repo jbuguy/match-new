@@ -117,13 +117,13 @@ describe("role-aware app shell", () => {
     ["employer", ["Vue d’ensemble", "Mes offres", "Candidatures", "Assistant", "Mon organisation"]],
     [
       "ministry_admin",
-      ["Vue d’ensemble"],
+      ["Vue d’ensemble", "Assistant"],
     ],
     [
       "training_provider",
-      ["Vue d’ensemble", "Catalogue de formations"],
+      ["Vue d’ensemble", "Catalogue de formations", "Assistant"],
     ],
-    ["operator", ["Vue d’ensemble", "Services", "Journaux d’audit"]],
+    ["operator", ["Vue d’ensemble", "Services", "Journaux d’audit", "Assistant"]],
   ] as const)("limits %s navigation to its role", async (role, allowedItems) => {
     authenticate(role);
     render(<App />);
@@ -1197,9 +1197,9 @@ describe("role-aware app shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Créer mon compte" }));
 
     expect(await screen.findByRole("heading", {
-      name: "Complétez votre profil avec l’assistant",
+      name: "Mon profil professionnel",
     })).toBeVisible();
-    expect(screen.getByText(/Le Derja tunisien/i)).toBeVisible();
+    expect(screen.getByText(/Derja tunisien/i)).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/auth/register",
       expect.objectContaining({ method: "POST" }),
@@ -1226,6 +1226,81 @@ describe("role-aware app shell", () => {
           String(url).endsWith("/candidate/profile") &&
           init?.method === "PUT" &&
           JSON.parse(String(init.body)).full_name === "Amira Ben Salem",
+      ),
+    ).toBe(true);
+  });
+
+  it("reviews and edits CV extraction before saving it to the candidate profile", async () => {
+    const candidate = userForRole("candidate");
+    const emptyProfile = {
+      user_id: candidate.id,
+      full_name: null,
+      phone: null,
+      location: null,
+      education: null,
+      experience: null,
+      skills: [],
+      updated_at: null,
+    };
+    const extractedProfile = {
+      ...emptyProfile,
+      full_name: "Amira Ben Salem",
+      phone: "+216 20 000 000",
+      location: "Tunis",
+      education: "Master en gestion",
+      experience: "Support client",
+      skills: ["Excel", "CRM"],
+    };
+    const fetchMock = vi.fn().mockImplementation(
+      async (input: string, init?: RequestInit) => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          if (input.endsWith("/auth/me")) return candidate;
+          if (input.endsWith("/candidate/profile/cv")) return extractedProfile;
+          if (input.endsWith("/candidate/profile") && init?.method === "PUT") {
+            return { ...emptyProfile, ...JSON.parse(String(init.body)) };
+          }
+          if (input.endsWith("/candidate/profile")) return emptyProfile;
+          return {};
+        },
+      }),
+    );
+    sessionStorage.setItem("mahara-match-token", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByRole("navigation", { name: /navigation principale/i });
+    fireEvent.click(screen.getByRole("button", { name: "Mon profil" }));
+    await screen.findByRole("button", { name: "Importer un CV" });
+    const cvInput = document.querySelector<HTMLInputElement>("#candidate-cv-upload");
+    if (!cvInput) throw new Error("CV upload input is missing.");
+    fireEvent.change(cvInput, {
+      target: { files: [new File(["CV text"], "amira-cv.txt", { type: "text/plain" })] },
+    });
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Vérifiez les informations extraites" })).toBeVisible();
+    expect(within(dialog).getByLabelText("Compétences")).toHaveValue("Excel, CRM");
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url).endsWith("/candidate/profile") && init?.method === "PUT",
+      ),
+    ).toBe(false);
+
+    fireEvent.change(within(dialog).getByLabelText("Nom complet"), {
+      target: { value: "Amira Ben Salah" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enregistrer le profil" }));
+
+    expect(await screen.findByText("Votre profil extrait du CV a été enregistré.")).toBeVisible();
+    expect(screen.getByLabelText("Nom complet")).toHaveValue("Amira Ben Salah");
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/candidate/profile") &&
+          init?.method === "PUT" &&
+          JSON.parse(String(init.body)).full_name === "Amira Ben Salah",
       ),
     ).toBe(true);
   });
