@@ -13,16 +13,40 @@ function authenticate(role: Role) {
   sessionStorage.setItem("mahara-match-token", "test-token");
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockImplementation(async (input: string) => ({
-      ok: true,
-      status: 200,
-      json: async () =>
-        input.endsWith("/auth/me")
-          ? userForRole(role)
-          : input.endsWith("/candidate/roadmap")
-            ? { steps: [], completed_steps: 0, total_steps: 0, progress_percent: 0 }
-            : {},
-    })),
+    vi.fn().mockImplementation(async (input: string) => {
+      let payload: unknown = {};
+      if (input.endsWith("/auth/me")) {
+        payload = userForRole(role);
+      } else if (input.endsWith("/candidate/roadmap")) {
+        payload = { steps: [], completed_steps: 0, total_steps: 0, progress_percent: 0 };
+      } else if (input.endsWith("/admin/indicators")) {
+        payload = {
+          start_date: null,
+          end_date: null,
+          candidate_registrations: 0,
+          organisations: 0,
+          published_job_offers: 0,
+          applications_total: 0,
+          applications_by_status: [],
+          closed_applications: 0,
+          hired_applications: 0,
+          hire_rate_percent: null,
+          top_skills: [],
+          published_courses: 0,
+          active_enrollments: 0,
+          course_completions: 0,
+        };
+      } else if (
+        input.endsWith("/training/courses") ||
+        input.includes("/training/courses/") ||
+        input.endsWith("/candidate/courses") ||
+        input.endsWith("/candidate/enrollments") ||
+        input.endsWith("/candidate/applications")
+      ) {
+        payload = [];
+      }
+      return { ok: true, status: 200, json: async () => payload };
+    }),
   );
 }
 
@@ -54,8 +78,8 @@ describe("role-aware app shell", () => {
   });
 
   it.each([
-    ["ministry_admin", "Indicateurs agrégés", "Espace administration"],
-    ["training_provider", "Catalogue de formations", "Espace organisme de formation"],
+    ["ministry_admin", "Vue d’ensemble", "Tableau de bord administration"],
+    ["training_provider", "Catalogue de formations", "Votre catalogue de formations"],
     ["operator", "Journaux d’audit", "Espace opérations"],
   ] as const)(
     "renders the %s navigation and dashboard",
@@ -76,16 +100,24 @@ describe("role-aware app shell", () => {
   it.each([
     [
       "candidate",
-      ["Vue d’ensemble", "Mes opportunités", "Mon parcours", "Formations", "Assistant", "Mon profil"],
+      [
+        "Vue d’ensemble",
+        "Mes opportunités",
+        "Mon parcours",
+        "Formations",
+        "Mes candidatures",
+        "Assistant",
+        "Mon profil",
+      ],
     ],
     ["employer", ["Vue d’ensemble", "Mes offres", "Candidatures", "Assistant", "Mon organisation"]],
     [
       "ministry_admin",
-      ["Vue d’ensemble", "Référentiels", "Suggestions", "Importations", "Indicateurs agrégés"],
+      ["Vue d’ensemble"],
     ],
     [
       "training_provider",
-      ["Vue d’ensemble", "Catalogue de formations", "Mon organisation"],
+      ["Vue d’ensemble", "Catalogue de formations"],
     ],
     ["operator", ["Vue d’ensemble", "Services", "Journaux d’audit"]],
   ] as const)("limits %s navigation to its role", async (role, allowedItems) => {
@@ -100,6 +132,42 @@ describe("role-aware app shell", () => {
     for (const label of allowedItems) {
       expect(navigation.getByRole("button", { name: label })).toBeVisible();
     }
+  }  );
+
+  it("shows meaningful aggregate metrics on the administration dashboard", async () => {
+    sessionStorage.setItem("mahara-match-token", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string) => ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          input.endsWith("/auth/me")
+            ? userForRole("ministry_admin")
+            : {
+                start_date: null,
+                end_date: null,
+                candidate_registrations: 25,
+                organisations: 4,
+                published_job_offers: 12,
+                applications_total: 8,
+                applications_by_status: [{ status: "hired", count: 2 }],
+                closed_applications: 4,
+                hired_applications: 2,
+                hire_rate_percent: 50,
+                top_skills: [{ skill: "Python", offer_count: 7 }],
+                published_courses: 3,
+                active_enrollments: 6,
+                course_completions: 2,
+              },
+      })),
+    );
+    render(<App />);
+
+    expect(await screen.findByText("25")).toBeVisible();
+    expect(screen.getByText(/50/)).toBeVisible();
+    expect(screen.getAllByText("Python")).toHaveLength(2);
+    expect(screen.getByText(/2 embauches sur 4 candidatures clôturées/i)).toBeVisible();
   });
 
   it("shows a clear empty state when the candidate has no roadmap steps", async () => {

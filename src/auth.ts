@@ -55,6 +55,89 @@ export type JobMatch = JobOffer & {
   missing_skills: string[];
 };
 
+export type JobApplicationStatus =
+  | "submitted"
+  | "reviewing"
+  | "interview"
+  | "hired"
+  | "rejected";
+
+export type JobApplication = {
+  id: string;
+  job_offer_id: string;
+  job_title: string;
+  location: string;
+  status: JobApplicationStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmployerApplication = JobApplication & {
+  candidate_name: string | null;
+  candidate_location: string | null;
+  candidate_skills: string[];
+};
+
+export type CourseStatus = "draft" | "published" | "archived";
+export type CourseDeliveryMode = "online" | "in_person" | "hybrid";
+export type CourseEnrollmentStatus = "enrolled" | "completed" | "withdrawn";
+
+export type TrainingCourse = {
+  id: string;
+  title: string;
+  summary: string;
+  skills: string[];
+  delivery_mode: CourseDeliveryMode;
+  location: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
+  duration_hours: number;
+  capacity: number;
+  price_tnd: string | null;
+  status: CourseStatus;
+  created_at: string;
+  updated_at: string;
+  enrollment_count: number;
+  completed_count: number;
+};
+
+export type TrainingCourseDraft = Omit<
+  TrainingCourse,
+  "id" | "provider_id" | "created_at" | "updated_at" | "enrollment_count" | "completed_count"
+>;
+
+export type CourseEnrollment = {
+  id: string;
+  course_id: string;
+  course_title: string;
+  status: CourseEnrollmentStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProviderCourseEnrollment = CourseEnrollment & {
+  candidate_name: string | null;
+  candidate_location: string | null;
+  candidate_skills: string[];
+};
+
+export type AdminIndicators = {
+  start_date: string | null;
+  end_date: string | null;
+  candidate_registrations: number;
+  organisations: number;
+  published_job_offers: number;
+  applications_total: number;
+  applications_by_status: { status: JobApplicationStatus; count: number }[];
+  closed_applications: number;
+  hired_applications: number;
+  hire_rate_percent: number | null;
+  top_skills: { skill: string; offer_count: number }[];
+  published_courses: number;
+  active_enrollments: number;
+  course_completions: number;
+};
+
 export type CandidateRoadmapStep = {
   skill: string;
   skill_key: string;
@@ -313,5 +396,100 @@ export function createEmployerOffer(
   return authenticatedRequest(token, "/employer/offers", {
     method: "POST",
     body: JSON.stringify(offer),
+  });
+}
+
+export function applyToJob(token: string, offerId: string): Promise<JobApplication> {
+  return authenticatedRequest(token, `/candidate/applications/${offerId}`, {
+    method: "POST",
+  });
+}
+
+export function fetchCandidateApplications(token: string): Promise<JobApplication[]> {
+  return authenticatedRequest(token, "/candidate/applications");
+}
+
+export function fetchEmployerApplications(token: string): Promise<EmployerApplication[]> {
+  return authenticatedRequest(token, "/employer/applications");
+}
+
+export function updateEmployerApplicationStatus(
+  token: string,
+  applicationId: string,
+  status: Exclude<JobApplicationStatus, "submitted">,
+): Promise<JobApplication> {
+  return authenticatedRequest(token, `/employer/applications/${applicationId}/status`, {
+    method: "PUT",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function fetchAdminIndicators(
+  token: string,
+  startDate: string,
+  endDate: string,
+): Promise<AdminIndicators> {
+  const query = new URLSearchParams();
+  if (startDate) query.set("start_date", startDate);
+  if (endDate) query.set("end_date", endDate);
+  const queryString = query.toString();
+  const suffix = queryString ? `?${queryString}` : "";
+  return authenticatedRequest(token, `/admin/indicators${suffix}`);
+}
+
+export function fetchTrainingCourses(token: string): Promise<TrainingCourse[]> {
+  return authenticatedRequest(token, "/training/courses");
+}
+
+export function createTrainingCourse(
+  token: string,
+  course: TrainingCourseDraft,
+): Promise<TrainingCourse> {
+  return authenticatedRequest(token, "/training/courses", {
+    method: "POST",
+    body: JSON.stringify(course),
+  });
+}
+
+export function updateTrainingCourse(
+  token: string,
+  courseId: string,
+  course: TrainingCourseDraft,
+): Promise<TrainingCourse> {
+  return authenticatedRequest(token, `/training/courses/${courseId}`, {
+    method: "PUT",
+    body: JSON.stringify(course),
+  });
+}
+
+export function fetchProviderCourseEnrollments(
+  token: string,
+  courseId: string,
+): Promise<ProviderCourseEnrollment[]> {
+  return authenticatedRequest(token, `/training/courses/${courseId}/enrollments`);
+}
+
+export function updateCourseEnrollmentStatus(
+  token: string,
+  enrollmentId: string,
+  status: CourseEnrollmentStatus,
+): Promise<ProviderCourseEnrollment> {
+  return authenticatedRequest(token, `/training/enrollments/${enrollmentId}/status`, {
+    method: "PUT",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function fetchPublishedCourses(token: string): Promise<TrainingCourse[]> {
+  return authenticatedRequest(token, "/candidate/courses");
+}
+
+export function fetchCandidateEnrollments(token: string): Promise<CourseEnrollment[]> {
+  return authenticatedRequest(token, "/candidate/enrollments");
+}
+
+export function enrollInCourse(token: string, courseId: string): Promise<CourseEnrollment> {
+  return authenticatedRequest(token, `/candidate/courses/${courseId}/enroll`, {
+    method: "POST",
   });
 }

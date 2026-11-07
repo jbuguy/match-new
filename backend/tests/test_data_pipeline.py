@@ -9,8 +9,12 @@ from openpyxl import Workbook
 from app.data_pipeline import (
     CollectionError,
     SOURCES,
+    _agridata_job_creation_records,
     _bmo_xlsx_records,
+    _ckan_result,
     _eurostat_records,
+    _vocational_specialty_records,
+    _world_bank_records,
     collect_sources,
 )
 from app.synthetic_data import generate_synthetic_offers, write_synthetic_offers
@@ -89,6 +93,240 @@ def test_eurostat_normalizer_rejects_unexpected_dimensions() -> None:
     }
     with pytest.raises(CollectionError, match="unexpected"):
         _eurostat_records(response)
+
+
+def test_world_bank_normalizer_preserves_tunisia_indicator_provenance() -> None:
+    source = SOURCES["worldbank-tn-unemployment"]
+    response: list[Any] = [
+        {"page": 1, "pages": 1, "total": 2, "lastupdated": "2026-10-08"},
+        [
+            {
+                "indicator": {
+                    "id": "SL.UEM.TOTL.ZS",
+                    "value": "Unemployment, total (% of total labor force) (modeled ILO estimate)",
+                },
+                "countryiso3code": "TUN",
+                "date": "2025",
+                "value": 15.108,
+            },
+            {
+                "indicator": {"id": "SL.UEM.TOTL.ZS", "value": "Unemployment"},
+                "countryiso3code": "TUN",
+                "date": "2024",
+                "value": None,
+            },
+        ],
+    ]
+
+    assert _world_bank_records(response, source) == [
+        {
+            "country": "TN",
+            "country_name": "Tunisia",
+            "indicator_id": "SL.UEM.TOTL.ZS",
+            "indicator": (
+                "Unemployment, total (% of total labor force) "
+                "(modeled ILO estimate)"
+            ),
+            "period": "2025",
+            "value": 15.108,
+            "unit": "percent",
+            "methodology": "World Bank indicator based on modelled ILO estimates.",
+            "source_id": "worldbank-tn-unemployment",
+            "provider": "World Bank, World Development Indicators",
+            "source_url": (
+                "https://data.worldbank.org/indicator/SL.UEM.TOTL.ZS?locations=TN"
+            ),
+            "updated_at": "2026-10-08",
+            "record_type": "labour_market_observation",
+        }
+    ]
+
+
+def test_world_bank_normalizer_rejects_wrong_indicator_and_invalid_values() -> None:
+    source = SOURCES["worldbank-tn-unemployment"]
+    with pytest.raises(CollectionError, match="unexpected indicator"):
+        _world_bank_records(
+            [
+                {},
+                [{"indicator": {"id": "OTHER"}, "date": "2025", "value": 15.1}],
+            ],
+            source,
+        )
+    with pytest.raises(CollectionError, match="non-numeric"):
+        _world_bank_records(
+            [
+                {},
+                [
+                    {
+                        "indicator": {"id": source.indicator_id},
+                        "countryiso3code": "TUN",
+                        "date": "2025",
+                        "value": "15.1",
+                    }
+                ],
+            ],
+            source,
+        )
+    with pytest.raises(CollectionError, match="unexpected country"):
+        _world_bank_records(
+            [
+                {},
+                [
+                    {
+                        "indicator": {"id": source.indicator_id},
+                        "countryiso3code": "FRA",
+                        "date": "2025",
+                        "value": 15.1,
+                    }
+                ],
+            ],
+            source,
+        )
+
+
+def test_collector_writes_world_bank_tunisia_indicator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SOURCES["worldbank-tn-unemployment"]
+    response = [
+        {"page": 1, "pages": 1, "total": 1, "lastupdated": "2026-10-08"},
+        [
+            {
+                "indicator": {"id": source.indicator_id, "value": source.title},
+                "countryiso3code": "TUN",
+                "date": "2025",
+                "value": 15.108,
+            }
+        ],
+    ]
+    monkeypatch.setattr(
+        "app.data_pipeline._request_bytes",
+        lambda url, host: json.dumps(response).encode(),
+    )
+
+    manifest, failed = collect_sources(tmp_path, [source.id])
+
+    assert not failed
+    assert manifest[0]["status"] == "ok"
+    assert manifest[0]["provider"] == "World Bank, World Development Indicators"
+    assert manifest[0]["data_last_updated"] == "2026-10-08"
+    assert manifest[0]["record_count"] == 1
+    record = json.loads(
+        (tmp_path / "normalized" / f"{source.id}.jsonl").read_text(encoding="utf-8")
+    )
+    assert record["country"] == "TN"
+    assert record["period"] == "2025"
+    assert record["value"] == 15.108
+
+
+def test_vocational_specialty_normalizer_keeps_historical_bilingual_fields() -> None:
+    content = (
+        "القطاع;القطــاع الفرعي;رمز الاختصاص;تسمية الإختصاص;رمز;الشهادة;"
+        "مدة التكوين بالسنة\n"
+        "BTP;Building;301204;Ferrailleur;حدائدي;ش ك م;1\n"
+        "; ;301205;Poseur de revêtements;مركب;ش ك م;2\n"
+    ).encode("utf-8")
+
+    records = _vocational_specialty_records(content)
+
+    assert len(records) == 2
+    assert records[0]["specialty_fr"] == "Ferrailleur"
+    assert records[0]["specialty_ar"] == "حدائدي"
+    assert records[1]["sector"] == "BTP"
+    assert records[1]["subsector"] == "Building"
+    assert records[0]["source_year"] == 2017
+    assert records[0]["availability_status"] == (
+        "historical_specialty_list_not_current_course_catalogue"
+    )
+    assert not any("phone" in key or "email" in key for key in records[0])
+
+
+def test_agridata_normalizer_maps_job_creation_series_with_methodology() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append([None, 2017, 2018, 2019, 2020, 2021, 2022])
+    sheet.append(["Nombre d'emploi crées", 5719, 6654, 5464, 3965, 4288, 3541])
+    content = BytesIO()
+    workbook.save(content)
+    workbook.close()
+
+    records = _agridata_job_creation_records(content.getvalue())
+
+    assert len(records) == 6
+    assert records[0]["country"] == "TN"
+    assert records[0]["period"] == "2017"
+    assert records[0]["value"] == 5719
+    assert records[-1]["period"] == "2022"
+    assert records[-1]["value"] == 3541
+    assert "not total employment or vacancies" in str(records[0]["methodology"])
+
+
+def test_ckan_collector_checks_license_and_keeps_raw_resource_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SOURCES["tunisia-vocational-specialties"]
+    resource_url = (
+        "https://catalog.data.gov.tn/dataset/specialties.csv"
+    )
+    catalogue = {
+        "success": True,
+        "result": {
+            "id": source.ckan_dataset_id,
+            "title": source.title,
+            "url": source.landing_page,
+            "license_title": "cc-by",
+            "license_url": "https://creativecommons.org/licenses/by/4.0/",
+            "metadata_modified": "2023-03-14T18:04:03.369347",
+            "organization": {"title": source.provider},
+            "resources": [
+                {
+                    "name": "Liste des spécialités",
+                    "format": "CSV",
+                    "url": resource_url,
+                    "last_modified": "2023-03-14T18:00:00",
+                }
+            ],
+        },
+    }
+    csv_content = (
+        "القطاع;القطــاع الفرعي;رمز الاختصاص;تسمية الإختصاص;رمز;الشهادة;"
+        "مدة التكوين بالسنة\n"
+        "BTP;Building;301204;Ferrailleur;حدائدي;ش ك م;1\n"
+    ).encode("utf-8")
+
+    def fake_request(url: str, hosts: set[str]) -> bytes:
+        if url == source.url:
+            assert hosts == {source.host}
+            return json.dumps(catalogue, ensure_ascii=False).encode("utf-8")
+        assert url == resource_url
+        assert hosts == {source.host}
+        return csv_content
+
+    monkeypatch.setattr("app.data_pipeline._request_bytes", fake_request)
+
+    manifest, failed = collect_sources(tmp_path, [source.id])
+
+    assert not failed
+    entry = manifest[0]
+    assert entry["status"] == "ok"
+    assert entry["license"] == "cc-by"
+    assert entry["resource_title"] == "Liste des spécialités"
+    assert entry["record_count"] == 1
+    normalized = json.loads(
+        (tmp_path / "normalized" / f"{source.id}.jsonl").read_text(encoding="utf-8")
+    )
+    assert normalized["specialty_fr"] == "Ferrailleur"
+
+
+def test_ckan_normalizer_rejects_unreviewed_license() -> None:
+    source = SOURCES["tunisia-vocational-specialties"]
+    with pytest.raises(CollectionError, match="licence changed"):
+        _ckan_result(
+            {"result": {"id": source.ckan_dataset_id, "license_title": "other"}},
+            source,
+        )
 
 
 def test_bmo_normalizer_maps_occupation_and_region_fields() -> None:

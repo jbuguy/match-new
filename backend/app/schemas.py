@@ -1,9 +1,16 @@
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models import Role
+from app.models import (
+    CourseDeliveryMode,
+    CourseEnrollmentStatus,
+    CourseStatus,
+    JobApplicationStatus,
+    Role,
+)
 
 
 def normalize_skills(value: list[str]) -> list[str]:
@@ -236,6 +243,144 @@ class JobMatchResponse(JobOfferResponse):
     match_score: int
     matched_skills: list[str]
     missing_skills: list[str]
+
+
+class JobApplicationResponse(BaseModel):
+    id: str
+    job_offer_id: str
+    job_title: str
+    location: str
+    status: JobApplicationStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class EmployerApplicationResponse(JobApplicationResponse):
+    candidate_name: str | None
+    candidate_location: str | None
+    candidate_skills: list[str]
+
+
+class JobApplicationStatusUpdate(BaseModel):
+    status: JobApplicationStatus
+
+
+class TrainingCourseFields(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    summary: str = Field(min_length=10, max_length=5000)
+    skills: list[str] = Field(min_length=1, max_length=30)
+    delivery_mode: CourseDeliveryMode
+    location: str | None = Field(default=None, max_length=120)
+    starts_on: date | None = None
+    ends_on: date | None = None
+    duration_hours: int = Field(ge=1, le=2000)
+    capacity: int = Field(ge=1, le=10000)
+    price_tnd: Decimal | None = Field(default=None, ge=0, max_digits=10, decimal_places=2)
+    status: CourseStatus = CourseStatus.DRAFT
+
+    @field_validator("title", "summary")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("location")
+    @classmethod
+    def trim_location(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @field_validator("skills")
+    @classmethod
+    def clean_course_skills(cls, value: list[str]) -> list[str]:
+        normalized = normalize_skills(value)
+        if not normalized:
+            raise ValueError("At least one course skill is required.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_course_details(self) -> "TrainingCourseFields":
+        if not self.title or not self.summary:
+            raise ValueError("Title and summary cannot be blank.")
+        if self.starts_on and self.ends_on and self.ends_on < self.starts_on:
+            raise ValueError("Course end date must be on or after its start date.")
+        if (
+            self.delivery_mode in {CourseDeliveryMode.IN_PERSON, CourseDeliveryMode.HYBRID}
+            and not self.location
+        ):
+            raise ValueError("A location is required for in-person or hybrid courses.")
+        return self
+
+
+class TrainingCourseCreate(TrainingCourseFields):
+    pass
+
+
+class TrainingCourseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    summary: str
+    skills: list[str]
+    delivery_mode: CourseDeliveryMode
+    location: str | None
+    starts_on: date | None
+    ends_on: date | None
+    duration_hours: int
+    capacity: int
+    price_tnd: Decimal | None
+    status: CourseStatus
+    created_at: datetime
+    updated_at: datetime
+    enrollment_count: int = 0
+    completed_count: int = 0
+
+
+class CourseEnrollmentResponse(BaseModel):
+    id: str
+    course_id: str
+    course_title: str
+    status: CourseEnrollmentStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProviderCourseEnrollmentResponse(CourseEnrollmentResponse):
+    candidate_name: str | None
+    candidate_location: str | None
+    candidate_skills: list[str]
+
+
+class CourseEnrollmentStatusUpdate(BaseModel):
+    status: CourseEnrollmentStatus
+
+
+class SkillDemandIndicator(BaseModel):
+    skill: str
+    offer_count: int
+
+
+class ApplicationStatusIndicator(BaseModel):
+    status: JobApplicationStatus
+    count: int
+
+
+class AdminIndicatorsResponse(BaseModel):
+    start_date: date | None
+    end_date: date | None
+    candidate_registrations: int
+    organisations: int
+    published_job_offers: int
+    applications_total: int
+    applications_by_status: list[ApplicationStatusIndicator]
+    closed_applications: int
+    hired_applications: int
+    hire_rate_percent: float | None
+    top_skills: list[SkillDemandIndicator]
+    published_courses: int
+    active_enrollments: int
+    course_completions: int
 
 
 class CandidateRoadmapStepResponse(BaseModel):

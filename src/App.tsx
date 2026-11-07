@@ -1,16 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowUpRight,
-  BarChart3,
   BriefcaseBusiness,
   Building2,
   ChevronDown,
   ClipboardList,
   Compass,
-  Database,
   GraduationCap,
   LayoutDashboard,
-  ListChecks,
   LogOut,
   Menu,
   MessageCircle,
@@ -18,11 +15,17 @@ import {
   Settings2,
   Sparkles,
   Sun,
-  Upload,
   UserRound,
   X,
 } from "lucide-react";
 import { Badge, Button, Card, ProgressBar } from "./components/ui";
+import {
+  AdminDashboardPage,
+  CandidateApplicationsPage,
+  CandidateCoursesPage,
+  EmployerApplicationsPage,
+  TrainingProviderDashboardPage,
+} from "./marketplace";
 import {
   CandidateAssistantPage,
   CandidateMatchesPage,
@@ -57,6 +60,7 @@ const roleConfiguration: Record<
       { label: "Mes opportunités", icon: BriefcaseBusiness },
       { label: "Mon parcours", icon: Compass },
       { label: "Formations", icon: GraduationCap },
+      { label: "Mes candidatures", icon: ClipboardList },
       { label: "Assistant", icon: MessageCircle },
       { label: "Mon profil", icon: UserRound },
     ],
@@ -77,22 +81,15 @@ const roleConfiguration: Record<
   },
   ministry_admin: {
     label: "Administration",
-    navigation: [
-      { label: "Vue d’ensemble", icon: LayoutDashboard },
-      { label: "Référentiels", icon: Database },
-      { label: "Suggestions", icon: ListChecks },
-      { label: "Importations", icon: Upload },
-      { label: "Indicateurs agrégés", icon: BarChart3 },
-    ],
+    navigation: [{ label: "Vue d’ensemble", icon: LayoutDashboard }],
     dashboardTitle: "Espace administration",
-    dashboardDescription: "Gérez les référentiels et consultez les indicateurs agrégés de la plateforme.",
+    dashboardDescription: "Suivez les indicateurs agrégés de la plateforme et les résultats déclarés.",
   },
   training_provider: {
     label: "Organisme de formation",
     navigation: [
       { label: "Vue d’ensemble", icon: LayoutDashboard },
       { label: "Catalogue de formations", icon: GraduationCap },
-      { label: "Mon organisation", icon: Building2 },
     ],
     dashboardTitle: "Espace organisme de formation",
     dashboardDescription: "Gérez votre catalogue de formations liées aux compétences validées.",
@@ -347,6 +344,10 @@ export default function App() {
           {isDashboard ? (
             isCandidate ? (
               <Dashboard onNavigate={setActivePage} />
+            ) : user.role === "ministry_admin" ? (
+              <AdminDashboardPage token={accessToken} />
+            ) : user.role === "training_provider" ? (
+              <TrainingProviderDashboardPage token={accessToken} />
             ) : (
               <RoleDashboard
                 title={configuration.dashboardTitle}
@@ -363,10 +364,18 @@ export default function App() {
             <CandidateRoadmapPage token={accessToken} onNavigate={setActivePage} />
           ) : isCandidate && activePage === "Assistant" ? (
             <CandidateAssistantPage token={accessToken} onNavigate={setActivePage} />
+          ) : isCandidate && activePage === "Formations" ? (
+            <CandidateCoursesPage token={accessToken} />
+          ) : isCandidate && activePage === "Mes candidatures" ? (
+            <CandidateApplicationsPage token={accessToken} />
           ) : user.role === "employer" && activePage === "Mes offres" ? (
             <EmployerOffersPage token={accessToken} />
+          ) : user.role === "employer" && activePage === "Candidatures" ? (
+            <EmployerApplicationsPage token={accessToken} />
           ) : user.role === "employer" && activePage === "Assistant" ? (
             <RoleAssistant role="employer" onNavigate={setActivePage} />
+          ) : user.role === "training_provider" && activePage === "Catalogue de formations" ? (
+            <TrainingProviderDashboardPage token={accessToken} />
           ) : (
             <section className="page-placeholder">
               <Badge>En préparation</Badge>

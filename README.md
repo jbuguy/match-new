@@ -14,8 +14,11 @@ matching, employer job offers, and role-specific guided assistants are also
 available. Candidates can also chat about careers in Derja, Arabic, or French
 and return to their saved assistant conversations. Their career roadmaps
 prioritize missing skills requested by published offers and save candidate-owned
-step progress. Applications and courses remain unavailable rather than
-simulated.
+step progress. Candidates can apply to offers and enroll in published
+formations. Employers can review applications and record hiring outcomes.
+Training providers can manage courses and follow enrollments and completions.
+The ministry administration dashboard reports filtered platform activity and
+aggregate outcomes without exposing candidate-level records.
 
 ## Requirements
 
@@ -79,7 +82,26 @@ created, read, and deleted at `/candidate/assistant/sessions`; send a message
 to a session at `POST /candidate/assistant/sessions/{session_id}/messages`.
 Candidates can read offer matches at `GET /candidate/matches`. Employers can
 publish offers at `POST /employer/offers` and list their own offers at
-`GET /employer/offers`.
+`GET /employer/offers`. Candidates submit and view applications at
+`POST /candidate/applications/{offer_id}` and `GET /candidate/applications`;
+employers review their offer applications at `GET /employer/applications` and
+update status at `PUT /employer/applications/{application_id}/status`.
+Training providers list, create, and update their own courses at
+`GET|POST /training/courses` and `PUT /training/courses/{course_id}`. Course
+metadata includes title, summary, skills, delivery mode, location, dates,
+duration, capacity, optional price in TND, and draft/published/archived status.
+Providers review participants at
+`GET /training/courses/{course_id}/enrollments` and record completion or
+withdrawal at `PUT /training/enrollments/{enrollment_id}/status`. Candidates
+browse published courses at `GET /candidate/courses`, enroll at
+`POST /candidate/courses/{course_id}/enroll`, and view their enrollments at
+`GET /candidate/enrollments`. Ministry administrators read date-filterable
+aggregate indicators at `GET /admin/indicators?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`.
+The reported hiring rate is hired applications divided by closed applications
+(hired or rejected); it represents employer-reported outcomes, not an
+independently verified employment measure. Application records and provider
+rosters are role-scoped, sensitive profile reads are audited, and the admin
+indicators endpoint returns aggregate data only.
 The match score is the percentage of an offer's required skills listed on the
 candidate profile; it is informational and does not predict hiring outcomes.
 
@@ -128,6 +150,30 @@ python -m app.data_pipeline --output-dir backend/data/open
 
 The collector currently retrieves:
 
+- World Bank World Development Indicators for Tunisia: annual total
+  unemployment, youth unemployment (ages 15–24), and employment-to-population
+  ratio. The unemployment series are modelled ILO estimates; the manifest
+  records each indicator's provider, source URL, licence note, retrieval time,
+  and checksum.
+- Tunisia's [National Open Data Catalogue](https://catalog.data.gov.tn) exposes
+  an open `cc-by` list of vocational specialties dated 2017 and a national
+  open-licence agricultural investment series counting jobs created through
+  2022. The specialty list is a historical taxonomy, not evidence that a
+  course is currently available. The agricultural series measures jobs
+  attributed to investment projects; it is not total employment or vacancies.
+- INS Statistiques publishes Tunisia employment-related statistical pages
+  (including its [employment statistics index](https://ins.tn/statistiques/emploi)).
+  The employment landing page links to employment/unemployment topics; in this
+  source check the linked topic pages did not expose a documented bulk API or
+  machine-readable labour-market series suitable for automatic ingestion.
+  ANETI's [official site](https://www.emploi.nat.tn/fo/Fr/global.php) exposes
+  live job-search services, but no public bulk endpoint or reuse terms for
+  vacancy collection were verified. Reuse terms for programmatic collection
+  from either site were not confirmed. Do not scrape either source or present
+  live listings as a trend dataset until an authorised, documented feed and
+  its terms are confirmed. The older employment-office directory contains
+  staff contact details and is deliberately excluded. Textile employment files
+  are also excluded until their custom catalogue licence is verified.
 - Eurostat annual unemployment rates for France (ages 15–74, total), from the
   official JSON API. It saves the source response and a normalized period/value
   series.
@@ -143,8 +189,68 @@ SHA-256 checksums. A failed or invalid source is recorded in the manifest and
 causes a non-zero exit; other configured sources are still attempted. Output
 under `backend/data/` is local and git-ignored. Check the upstream licence,
 availability, definitions, and revision notes before using or redistributing
-any collected data. Statistical trends are context, not individual hiring
-predictions.
+any collected data. Tunisia observations and France observations remain
+separately labelled. French data can provide comparative context about
+cross-border or European trends, but it is not evidence of Tunisian demand and
+must not be presented as a substitute for Tunisia-specific sources.
+Statistical trends are context, not individual hiring predictions.
+
+### Assistant knowledge and retrieval
+
+The assistant remains a general-purpose LM Studio chat. Retrieval is an
+optional layer for labour-market, skill, career, and job-search questions;
+ordinary general questions do not depend on the knowledge tables or embedding
+service. PostgreSQL uses pgvector for cosine similarity and a `simple`
+full-text index for keyword matching. Text, Markdown, and PDF ingestion keeps
+source, dates, country, language, category, skill/occupation metadata, and a
+content checksum; repeated ingestion of unchanged content does not duplicate
+chunks.
+
+The Compose stack uses the `pgvector/pgvector:pg17-trixie` PostgreSQL image,
+matching the Debian 13 base used by the original Postgres image, and has an
+optional CPU embedding service using
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (384 dimensions).
+The pgvector column is fixed at 384 dimensions; changing embedding models
+requires a corresponding schema migration.
+Set the embedding values shown in `.env.example`; start both services with
+`docker compose --profile rag up -d`. The model is multilingual, including
+French and Arabic; Tunisian Derja quality should be evaluated on representative
+queries. Its 128-token input limit is why the example uses 350-character
+chunks. The endpoint must implement the OpenAI-compatible `/v1/embeddings`
+request. With no embedding endpoint, document ingestion and retrieval use
+keyword search only. An embedding service failure is logged and also falls
+back to keyword search; it must not block a general assistant response.
+Configure the chunk, retrieval, timeout, similarity, and hybrid-weight
+settings in `.env.example`.
+
+Apply the migration after installing requirements. PostgreSQL must permit
+`CREATE EXTENSION vector` and provide pgvector. Use the `app.knowledge_base`
+service functions to ingest or remove documents programmatically. To load the
+approved, collected annual Tunisia and France unemployment series:
+
+```powershell
+$env:PYTHONPATH = "backend"
+python -m app.ingest_labour_data --data-dir backend/data/open
+```
+
+The importer loads only the reviewed annual series and the historical
+specialty list. It keeps country, provider, source URL, update date, year
+range, methodology, licence, and source vintage in document metadata.
+The France Travail BMO workbook is collected separately but not yet imported:
+it is a single-year set of regional recruitment intentions, not a time series
+or evidence of Tunisian demand, and needs a deliberate aggregation strategy
+before retrieval.
+
+Only ingest data whose source and reuse terms have been reviewed. The current
+Tunisia series are national macro indicators, not occupation-level vacancy or
+skill-demand data. French observations are retained as a distinct country and
+must not be represented as evidence of Tunisia-specific demand. The platform
+now has a provider-managed course catalogue and candidate enrollment records;
+the assistant's retrieval context does not yet query those records, so consult
+the candidate catalogue for current course availability rather than relying on
+assistant retrieval or historical specialty data. The structured platform
+contains candidate skills and employer-created job offers, but no authoritative
+occupation-skill taxonomy.
 
 Labour-market indicators do not require copying legal texts. The collector
 does not scrape or redistribute legislation; if a later feature needs a legal
@@ -155,18 +261,23 @@ applicability and update date rather than treating it as career advice.
 
 | Role | Access |
 | --- | --- |
-| Candidate | Own full profile, offer matches, roadmap progress, and deletable assistant sessions; future consents and applications |
-| Employer | Offers created by the signed-in employer; future applications and permitted applicant access |
-| Ministry admin | Referentials, suggestion review, dataset imports, logged exports, and aggregate indicators |
-| Training provider | Its organisation's course catalogue and validated skills |
+| Candidate | Own profile, offer matches, roadmap progress, assistant sessions, job applications, and course enrollments; browse published courses |
+| Employer | Offers created by the signed-in employer and applicants to those offers; manage application outcomes |
+| Ministry admin | Referentials, suggestion review, dataset imports, logged exports, and aggregate indicators without candidate-level records |
+| Training provider | Courses created by the signed-in provider; view and update enrollments for those courses |
 | Operator | Service configuration/status and audit metadata, never personal records |
 
 Every protected request verifies its JWT role against the current database user.
 The liveness endpoint is intentionally public. Candidate and organisation
-ownership guards are available for the domain routes as they are added. The
+ownership checks are enforced at each marketplace route. The
 current operator audit view omits email, user IDs, resource IDs, and event
 details. Admin actions and sensitive reads should use
 `record_admin_action` and `record_sensitive_read` after authorization checks;
+employer applicant access and provider enrollee access are scoped to their
+offers/courses and audited. Hiring outcomes are explicitly reported by
+employers; the dashboard rate is hires divided by closed applications, not an
+independently verified employment measure. Administration indicators contain
+aggregates only.
 profile changes, registration, and assistant service requests are audited
 without recording profile values, message content, or audio. Career chat
 messages are persisted only in sessions owned by the candidate and are

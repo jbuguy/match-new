@@ -2424,3 +2424,273 @@ p {
     flex-direction: column;
   }
 }
+
+.market-page {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.market-page > h1 {
+  margin: -8px 0 -10px;
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: clamp(24px, 2.4vw, 32px);
+  letter-spacing: -0.8px;
+}
+
+.market-page__intro,
+.market-range,
+.market-footnote {
+  max-width: 800px;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.market-range {
+  font-weight: 600;
+}
+
+.market-footnote {
+  max-width: 100%;
+  padding: 12px 14px;
+  border-left: 3px solid var(--color-brand);
+  border-radius: var(--radius-sm);
+  background: var(--color-brand-soft);
+}
+
+.market-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.market-filter .form-field {
+  width: min(220px, 100%);
+}
+
+.market-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.market-metrics--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.market-metric {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 116px;
+  padding: 16px;
+}
+
+.market-metric > span,
+.market-metric > small {
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.market-metric > strong {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: clamp(22px, 3vw, 30px);
+  letter-spacing: -0.5px;
+}
+
+.market-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.market-charts .chart-frame {
+  min-width: 0;
+}
+
+.market-bars {
+  display: grid;
+  align-content: start;
+  gap: 13px;
+}
+
+.market-bar {
+  display: grid;
+  gap: 6px;
+}
+
+.market-bar__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-text);
+  font-size: 11px;
+}
+
+.market-bar__track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-background);
+}
+
+.market-bar__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-brand);
+}
+
+.market-empty {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.market-panel {
+  display: grid;
+  gap: 17px;
+  padding: 20px;
+}
+
+.market-panel__heading,
+.market-section-heading,
+.market-list-card,
+.market-applicant-card .market-panel__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.market-panel__heading h2,
+.market-section-heading h2,
+.market-course-card h3,
+.market-list-card h2,
+.market-applicant-card h2 {
+  margin: 8px 0 0;
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: 16px;
+}
+
+.market-panel__heading p,
+.market-course-card > p,
+.market-list-card p,
+.market-applicant-card > p {
+  margin: 5px 0 0;
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.market-course-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.market-field--wide {
+  grid-column: 1 / -1;
+}
+
+.market-course-grid,
+.market-list {
+  display: grid;
+  gap: 12px;
+}
+
+.market-course-card,
+.market-list-card,
+.market-applicant-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.market-course-meta {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.market-course-card > .button,
+.market-row-actions > .button {
+  justify-self: start;
+}
+
+.market-status-control {
+  width: min(230px, 100%);
+  flex: 0 0 230px;
+}
+
+.market-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.market-applicant-skills {
+  color: var(--color-text) !important;
+}
+
+.app-shell[data-theme="dark"] .market-filter,
+.app-shell[data-theme="dark"] .market-footnote {
+  background: var(--color-surface);
+}
+
+.app-shell[data-theme="dark"] .market-filter .input,
+.app-shell[data-theme="dark"] .market-course-form .input,
+.app-shell[data-theme="dark"] .market-course-form .select,
+.app-shell[data-theme="dark"] .market-status-control .select {
+  border-color: #3a4b59;
+  background: #111d27;
+  color: #e1eaf1;
+}
+
+@media (max-width: 980px) {
+  .market-metrics,
+  .market-metrics--three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .market-charts,
+  .market-course-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .market-metrics,
+  .market-metrics--three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .market-field--wide {
+    grid-column: auto;
+  }
+
+  .market-panel__heading,
+  .market-list-card,
+  .market-applicant-card .market-panel__heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .market-status-control {
+    width: 100%;
+    flex-basis: auto;
+  }
+}

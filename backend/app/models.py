@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Enum as SqlEnum,
     ForeignKey,
     Index,
+    Numeric,
     String,
     UniqueConstraint,
     event,
@@ -29,6 +31,32 @@ class Role(str, Enum):
 class OrganisationType(str, Enum):
     EMPLOYER = "employer"
     TRAINING_PROVIDER = "training_provider"
+
+
+class JobApplicationStatus(str, Enum):
+    SUBMITTED = "submitted"
+    REVIEWING = "reviewing"
+    INTERVIEW = "interview"
+    HIRED = "hired"
+    REJECTED = "rejected"
+
+
+class CourseStatus(str, Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
+class CourseDeliveryMode(str, Enum):
+    ONLINE = "online"
+    IN_PERSON = "in_person"
+    HYBRID = "hybrid"
+
+
+class CourseEnrollmentStatus(str, Enum):
+    ENROLLED = "enrolled"
+    COMPLETED = "completed"
+    WITHDRAWN = "withdrawn"
 
 
 class User(Base):
@@ -184,6 +212,137 @@ class JobOffer(Base):
     required_skills: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
+class JobApplication(Base):
+    __tablename__ = "job_applications"
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "job_offer_id", name="uq_application_candidate_offer"),
+        Index("ix_job_applications_offer_created", "job_offer_id", "created_at"),
+        Index("ix_job_applications_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    job_offer_id: Mapped[str] = mapped_column(
+        ForeignKey("job_offers.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[JobApplicationStatus] = mapped_column(
+        SqlEnum(
+            JobApplicationStatus,
+            name="job_application_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda values: [member.value for member in values],
+        ),
+        default=JobApplicationStatus.SUBMITTED,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class TrainingCourse(Base):
+    __tablename__ = "training_courses"
+    __table_args__ = (
+        Index("ix_training_courses_provider_status", "provider_id", "status"),
+        Index("ix_training_courses_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    provider_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    summary: Mapped[str] = mapped_column(String(5000), nullable=False)
+    skills: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    delivery_mode: Mapped[CourseDeliveryMode] = mapped_column(
+        SqlEnum(
+            CourseDeliveryMode,
+            name="course_delivery_mode",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda values: [member.value for member in values],
+        ),
+        nullable=False,
+    )
+    location: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    starts_on: Mapped[date | None] = mapped_column(nullable=True)
+    ends_on: Mapped[date | None] = mapped_column(nullable=True)
+    duration_hours: Mapped[int] = mapped_column(nullable=False)
+    capacity: Mapped[int] = mapped_column(nullable=False)
+    price_tnd: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    status: Mapped[CourseStatus] = mapped_column(
+        SqlEnum(
+            CourseStatus,
+            name="course_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda values: [member.value for member in values],
+        ),
+        default=CourseStatus.DRAFT,
+        nullable=False,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class CourseEnrollment(Base):
+    __tablename__ = "course_enrollments"
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "course_id", name="uq_enrollment_candidate_course"),
+        Index("ix_course_enrollments_course_status", "course_id", "status"),
+        Index("ix_course_enrollments_candidate_created", "candidate_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    course_id: Mapped[str] = mapped_column(
+        ForeignKey("training_courses.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[CourseEnrollmentStatus] = mapped_column(
+        SqlEnum(
+            CourseEnrollmentStatus,
+            name="course_enrollment_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda values: [member.value for member in values],
+        ),
+        default=CourseEnrollmentStatus.ENROLLED,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
 
 

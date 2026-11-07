@@ -1,7 +1,7 @@
 
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17-trixie
     container_name: mahara_match_db
     restart: unless-stopped
 
@@ -22,5 +22,21 @@ services:
       timeout: 5s
       retries: 5
 
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    container_name: mahara_match_embeddings
+    restart: unless-stopped
+    profiles: ["rag"]
+    command:
+      - --model-id
+      - sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    ports:
+      - "8080:80"
+    volumes:
+      - huggingface_cache:/data
+    environment:
+      HF_HOME: /data
+
 volumes:
   postgres_data:
+  huggingface_cache:

@@ -1,6 +1,7 @@
 """Download selected public labour-market data and store raw and normalized snapshots."""
 
 import argparse
+import csv
 import hashlib
 import json
 import logging
@@ -12,7 +13,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -36,6 +37,11 @@ class DataSource:
     license: str
     landing_page: str
     format: str
+    indicator_id: str | None = None
+    ckan_dataset_id: str | None = None
+    resource_name_contains: str | None = None
+    resource_format: str | None = None
+    resource_hosts: tuple[str, ...] = ()
 
 
 SOURCES = {
@@ -62,6 +68,96 @@ SOURCES = {
         license="Licence Ouverte / Open Licence (Etalab)",
         landing_page="https://www.data.gouv.fr/datasets/enquete-besoins-en-main-doeuvre-bmo",
         format="JSON metadata and resource catalogue",
+    ),
+    "worldbank-tn-unemployment": DataSource(
+        id="worldbank-tn-unemployment",
+        title="Unemployment, total (% of total labour force) — Tunisia",
+        url=(
+            "https://api.worldbank.org/v2/country/TUN/indicator/"
+            "SL.UEM.TOTL.ZS?format=json&per_page=100&date=2010:2025"
+        ),
+        host="api.worldbank.org",
+        provider="World Bank, World Development Indicators",
+        license=(
+            "World Bank Terms of Use for Datasets; attribution required and "
+            "indicator-specific restrictions may apply."
+        ),
+        landing_page="https://data.worldbank.org/indicator/SL.UEM.TOTL.ZS?locations=TN",
+        format="World Bank Indicators API JSON",
+        indicator_id="SL.UEM.TOTL.ZS",
+    ),
+    "worldbank-tn-youth-unemployment": DataSource(
+        id="worldbank-tn-youth-unemployment",
+        title="Unemployment, youth ages 15–24 (% of youth labour force) — Tunisia",
+        url=(
+            "https://api.worldbank.org/v2/country/TUN/indicator/"
+            "SL.UEM.1524.ZS?format=json&per_page=100&date=2010:2025"
+        ),
+        host="api.worldbank.org",
+        provider="World Bank, World Development Indicators",
+        license=(
+            "World Bank Terms of Use for Datasets; attribution required and "
+            "indicator-specific restrictions may apply."
+        ),
+        landing_page="https://data.worldbank.org/indicator/SL.UEM.1524.ZS?locations=TN",
+        format="World Bank Indicators API JSON",
+        indicator_id="SL.UEM.1524.ZS",
+    ),
+    "worldbank-tn-employment-to-population": DataSource(
+        id="worldbank-tn-employment-to-population",
+        title="Employment to population ratio, ages 15+ — Tunisia",
+        url=(
+            "https://api.worldbank.org/v2/country/TUN/indicator/"
+            "SL.EMP.TOTL.SP.ZS?format=json&per_page=100&date=2010:2025"
+        ),
+        host="api.worldbank.org",
+        provider="World Bank, World Development Indicators",
+        license=(
+            "World Bank Terms of Use for Datasets; attribution required and "
+            "indicator-specific restrictions may apply."
+        ),
+        landing_page="https://data.worldbank.org/indicator/SL.EMP.TOTL.SP.ZS?locations=TN",
+        format="World Bank Indicators API JSON",
+        indicator_id="SL.EMP.TOTL.SP.ZS",
+    ),
+    "tunisia-vocational-specialties": DataSource(
+        id="tunisia-vocational-specialties",
+        title="Liste des spécialités de la formation professionnelle en Tunisie en 2017",
+        url=(
+            "https://catalog.data.gov.tn/api/3/action/package_show"
+            "?id=86fa57e3-4c1e-43ad-8cbb-ab9678f55848"
+        ),
+        host="catalog.data.gov.tn",
+        provider="Ministère de l'Emploi et de la Formation professionnelle",
+        license="cc-by",
+        landing_page=(
+            "https://catalog.data.gov.tn/dataset/"
+            "liste-des-specialites-de-la-formation-professionnelle-en-tunisie-en-2017"
+        ),
+        format="CKAN JSON metadata and semicolon-delimited UTF-8 CSV",
+        ckan_dataset_id="86fa57e3-4c1e-43ad-8cbb-ab9678f55848",
+        resource_name_contains="liste",
+        resource_format="CSV",
+    ),
+    "tunisia-agridata-jobs-created": DataSource(
+        id="tunisia-agridata-jobs-created",
+        title=(
+            "Nombre de postes d'emploi créés par les investissements agricoles "
+            "en Tunisie"
+        ),
+        url=(
+            "https://catalog.data.gov.tn/api/3/action/package_show"
+            "?id=20dfc498-397d-49d4-b0ff-b23d221e868a"
+        ),
+        host="catalog.data.gov.tn",
+        provider="APIA via Tunisia National Open Data Catalogue",
+        license="Licence Nationale de Données Publiques Ouvertes",
+        landing_page="https://catalog.data.gov.tn/dataset/recapitulatif-de-l-investissement-agricole",
+        format="CKAN JSON metadata and XLSX resource",
+        ckan_dataset_id="20dfc498-397d-49d4-b0ff-b23d221e868a",
+        resource_name_contains="postes d'emploi",
+        resource_format="XLS",
+        resource_hosts=("catalog.agridata.tn",),
     ),
 }
 
@@ -186,6 +282,214 @@ def _bmo_catalog_records(payload: dict[str, Any]) -> list[dict[str, object]]:
     ]
 
 
+def _world_bank_records(payload: Any, source: DataSource) -> list[dict[str, object]]:
+    if (
+        source.indicator_id is None
+        or not isinstance(payload, list)
+        or len(payload) != 2
+        or not isinstance(payload[1], list)
+    ):
+        raise CollectionError("World Bank response has an invalid indicators API structure.")
+
+    records: list[dict[str, object]] = []
+    metadata = payload[0]
+    if not isinstance(metadata, dict):
+        raise CollectionError("World Bank response is missing pagination metadata.")
+    data_last_updated = metadata.get("lastupdated")
+    for observation in payload[1]:
+        if not isinstance(observation, dict):
+            raise CollectionError("World Bank response contains an invalid observation.")
+        indicator = observation.get("indicator")
+        date = observation.get("date")
+        value = observation.get("value")
+        if not isinstance(indicator, dict) or indicator.get("id") != source.indicator_id:
+            raise CollectionError("World Bank response contains an unexpected indicator.")
+        if observation.get("countryiso3code") != "TUN":
+            raise CollectionError("World Bank response contains an unexpected country.")
+        if not isinstance(date, str) or not re.fullmatch(r"\d{4}", date):
+            raise CollectionError("World Bank observation has an invalid year.")
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise CollectionError("World Bank observation has a non-numeric value.")
+        records.append(
+            {
+                "country": "TN",
+                "country_name": "Tunisia",
+                "indicator_id": source.indicator_id,
+                "indicator": indicator.get("value") or source.title,
+                "period": date,
+                "value": value,
+                "unit": "percent",
+                "methodology": "World Bank indicator based on modelled ILO estimates.",
+                "source_id": source.id,
+                "provider": source.provider,
+                "source_url": source.landing_page,
+                "updated_at": data_last_updated,
+                "record_type": "labour_market_observation",
+            }
+        )
+    if not records:
+        raise CollectionError("World Bank response contains no numeric observations.")
+    return records
+
+
+def _ckan_result(payload: Any, source: DataSource) -> dict[str, Any]:
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(result, dict) or result.get("id") != source.ckan_dataset_id:
+        raise CollectionError("Tunisia open-data catalogue returned an unexpected dataset.")
+    if result.get("license_title") != source.license:
+        raise CollectionError(
+            f"Dataset licence changed from the reviewed licence for {source.id}."
+        )
+    return result
+
+
+def _ckan_resource(
+    payload: dict[str, Any],
+    source: DataSource,
+) -> dict[str, Any]:
+    resources = payload.get("resources")
+    if not isinstance(resources, list) or source.resource_name_contains is None:
+        raise CollectionError(f"Dataset {source.id} has no configured resource selector.")
+    candidates = [
+        resource
+        for resource in resources
+        if isinstance(resource, dict)
+        and str(resource.get("name", "")).casefold().find(
+            source.resource_name_contains.casefold()
+        ) >= 0
+        and str(resource.get("format", "")).upper() == source.resource_format
+    ]
+    if len(candidates) != 1:
+        raise CollectionError(
+            f"Expected exactly one reviewed resource for {source.id}; found {len(candidates)}."
+        )
+    resource = candidates[0]
+    resource_url = resource.get("url")
+    allowed_hosts = set(source.resource_hosts) or {source.host}
+    parsed = urllib.parse.urlparse(resource_url if isinstance(resource_url, str) else "")
+    if parsed.scheme != "https" or parsed.hostname not in allowed_hosts:
+        raise CollectionError(
+            f"Refusing resource URL outside the reviewed HTTPS hosts for {source.id}."
+        )
+    return resource
+
+
+def _vocational_specialty_records(payload: bytes) -> list[dict[str, object]]:
+    try:
+        csv_text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise CollectionError("Vocational specialty CSV must be UTF-8 encoded.") from error
+    reader = csv.DictReader(StringIO(csv_text), delimiter=";")
+    required_headers = {"رمز الاختصاص", "تسمية الإختصاص", "القطاع"}
+    if not reader.fieldnames or not required_headers.issubset(reader.fieldnames):
+        raise CollectionError("Vocational specialty CSV has unexpected columns.")
+    records: list[dict[str, object]] = []
+    current_sector = ""
+    current_subsector = ""
+    for row in reader:
+        current_sector = (row.get("القطاع") or "").strip() or current_sector
+        current_subsector = (row.get("القطــاع الفرعي") or "").strip() or current_subsector
+        specialty_code = (row.get("رمز الاختصاص") or "").strip()
+        specialty_fr = (row.get("تسمية الإختصاص") or "").strip()
+        specialty_ar = (row.get("رمز") or "").strip()
+        if not specialty_code or not (specialty_fr or specialty_ar):
+            continue
+        duration_value = (row.get("مدة التكوين بالسنة") or "").strip()
+        try:
+            duration = float(duration_value) if duration_value else None
+        except ValueError as error:
+            raise CollectionError("Vocational specialty duration is not numeric.") from error
+        records.append(
+            {
+                "country": "TN",
+                "record_type": "training_specialty",
+                "source_year": 2017,
+                "specialty_code": specialty_code,
+                "specialty_fr": specialty_fr,
+                "specialty_ar": specialty_ar,
+                "sector": current_sector,
+                "subsector": current_subsector,
+                "certificate": (row.get("الشهادة") or "").strip(),
+                "training_duration_years": duration,
+                "language": "ar+fr",
+                "availability_status": "historical_specialty_list_not_current_course_catalogue",
+            }
+        )
+    if not records:
+        raise CollectionError("Vocational specialty CSV contains no specialty records.")
+    return records
+
+
+def _agridata_job_creation_records(payload: bytes) -> list[dict[str, object]]:
+    try:
+        workbook = load_workbook(BytesIO(payload), read_only=True, data_only=True)
+    except (OSError, ValueError, zipfile.BadZipFile, InvalidFileException) as error:
+        raise CollectionError(f"Could not read the APIA jobs workbook: {error}") from error
+
+    try:
+        sheet = workbook.worksheets[0] if workbook.worksheets else None
+        if sheet is None:
+            raise CollectionError("APIA jobs workbook has no worksheets.")
+        rows = sheet.iter_rows(min_row=1, max_row=5, values_only=True)
+        header = next(rows, ())
+        years: dict[int, int] = {}
+        for column, value in enumerate(header[1:], start=1):
+            if isinstance(value, int) and not isinstance(value, bool) and 1900 <= value <= 2100:
+                years[value] = column
+            elif isinstance(value, str) and re.fullmatch(r"20\d{2}", value.strip()):
+                years[int(value)] = column
+        if not years:
+            raise CollectionError("APIA jobs workbook has no annual header values.")
+
+        job_row = None
+        for row in rows:
+            label = str(row[0] or "").casefold()
+            if "emploi" in label:
+                job_row = row
+                break
+        if job_row is None:
+            raise CollectionError("APIA jobs workbook has no job-creation measure row.")
+
+        records: list[dict[str, object]] = []
+        for year, column in sorted(years.items()):
+            value = job_row[column] if column < len(job_row) else None
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise CollectionError("APIA jobs workbook contains a non-numeric observation.")
+            records.append(
+                {
+                    "country": "TN",
+                    "country_name": "Tunisia",
+                    "record_type": "labour_market_observation",
+                    "indicator": "New jobs created through agricultural investments",
+                    "period": str(year),
+                    "value": value,
+                    "unit": "jobs created through agricultural investment projects",
+                    "methodology": (
+                        "Administrative count of jobs created through agricultural "
+                        "investment projects; not total employment or vacancies."
+                    ),
+                    "source_id": "tunisia-agridata-jobs-created",
+                }
+            )
+        if not records:
+            raise CollectionError("APIA jobs workbook has no numeric observations.")
+        return records
+    finally:
+        workbook.close()
+
+
+def _normalize_ckan_resource(source: DataSource, payload: bytes) -> Iterable[dict[str, object]]:
+    if source.id == "tunisia-vocational-specialties":
+        return _vocational_specialty_records(payload)
+    if source.id == "tunisia-agridata-jobs-created":
+        return _agridata_job_creation_records(payload)
+    raise CollectionError(f"No Tunisia catalogue normalizer is configured for {source.id}.")
+
+
 def _bmo_resource(payload: dict[str, Any]) -> tuple[int, str]:
     resources = payload.get("resources")
     if not isinstance(resources, list):
@@ -300,11 +604,13 @@ def _bmo_xlsx_records(payload: bytes) -> Iterable[dict[str, object]]:
     return records()
 
 
-def _normalize(source: DataSource, payload: dict[str, Any]) -> Iterable[dict[str, object]]:
+def _normalize(source: DataSource, payload: Any) -> Iterable[dict[str, object]]:
     if source.id == "eurostat-fr-unemployment":
         return _eurostat_records(payload)
     if source.id == "francetravail-bmo-catalog":
         return _bmo_catalog_records(payload)
+    if source.indicator_id is not None:
+        return _world_bank_records(payload, source)
     raise CollectionError(f"No normalizer is configured for source {source.id}.")
 
 
@@ -315,6 +621,64 @@ def _write_jsonl(path: Path, records: Iterable[dict[str, object]]) -> int:
             file.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
             count += 1
     return count
+
+
+def _collect_ckan_source(
+    source: DataSource,
+    output_dir: Path,
+    raw_dir: Path,
+    normalized_dir: Path,
+) -> dict[str, object]:
+    catalogue_bytes = _request_bytes(source.url, {source.host})
+    try:
+        catalogue_payload = json.loads(catalogue_bytes)
+    except json.JSONDecodeError as error:
+        raise CollectionError("Tunisia open-data catalogue returned invalid JSON.") from error
+    dataset = _ckan_result(catalogue_payload, source)
+    resource = _ckan_resource(dataset, source)
+    resource_url = str(resource["url"])
+    resource_hosts = set(source.resource_hosts) or {source.host}
+    resource_bytes = _request_bytes(resource_url, resource_hosts)
+    suffix = Path(urllib.parse.urlparse(resource_url).path).suffix.lower()
+    if suffix not in {".csv", ".xlsx", ".xls"}:
+        raise CollectionError(f"Unsupported Tunisia catalogue file extension: {suffix}.")
+
+    raw_catalogue_path = raw_dir / f"{source.id}.json"
+    raw_resource_path = raw_dir / f"{source.id}-resource{suffix}"
+    normalized_path = normalized_dir / f"{source.id}.jsonl"
+    raw_catalogue_path.write_bytes(catalogue_bytes)
+    raw_resource_path.write_bytes(resource_bytes)
+    record_count = _write_jsonl(
+        normalized_path,
+        _normalize_ckan_resource(source, resource_bytes),
+    )
+    organization = dataset.get("organization")
+    provider = (
+        organization.get("title")
+        if isinstance(organization, dict) and isinstance(organization.get("title"), str)
+        else source.provider
+    )
+    return {
+        "title": source.title,
+        "dataset_title": dataset.get("title"),
+        "provider": provider,
+        "license": dataset["license_title"],
+        "license_url": dataset.get("license_url"),
+        "dataset_id": dataset["id"],
+        "data_last_updated": dataset.get("metadata_modified"),
+        "resource_title": resource.get("name"),
+        "resource_format": resource.get("format"),
+        "resource_url": resource_url,
+        "resource_modified_at": resource.get("last_modified"),
+        "raw_path": raw_catalogue_path.relative_to(output_dir).as_posix(),
+        "resource_path": raw_resource_path.relative_to(output_dir).as_posix(),
+        "resource_sha256": hashlib.sha256(resource_bytes).hexdigest(),
+        "resource_bytes": len(resource_bytes),
+        "normalized_path": normalized_path.relative_to(output_dir).as_posix(),
+        "sha256": hashlib.sha256(catalogue_bytes).hexdigest(),
+        "record_count": record_count,
+        "status": "ok",
+    }
 
 
 def collect_sources(output_dir: Path, source_ids: list[str]) -> tuple[list[dict[str, object]], bool]:
@@ -339,12 +703,28 @@ def collect_sources(output_dir: Path, source_ids: list[str]) -> tuple[list[dict[
             "retrieved_at": retrieved_at,
         }
         try:
+            if source.ckan_dataset_id is not None:
+                entry.update(
+                    _collect_ckan_source(
+                        source,
+                        output_dir,
+                        raw_dir,
+                        normalized_dir,
+                    )
+                )
+                manifest.append(entry)
+                continue
+
             raw_bytes = _request_bytes(source.url, {source.host})
             raw_path = raw_dir / f"{source.id}.json"
             raw_path.write_bytes(raw_bytes)
             payload = json.loads(raw_bytes)
-            if not isinstance(payload, dict):
+            if source.indicator_id is None and not isinstance(payload, dict):
                 raise CollectionError("Source response must be a JSON object.")
+            if source.indicator_id is not None:
+                metadata = payload[0] if isinstance(payload, list) and payload else None
+                if isinstance(metadata, dict) and isinstance(metadata.get("lastupdated"), str):
+                    entry["data_last_updated"] = metadata["lastupdated"]
             records = _normalize(source, payload)
             entry["raw_path"] = raw_path.relative_to(output_dir).as_posix()
             if source.id == "francetravail-bmo-catalog":

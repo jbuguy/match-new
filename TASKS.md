@@ -57,6 +57,35 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
     controls; keep transcripts out of audit event details.
   - [ ] Re-run API session, ownership, deletion, and migration checks after
     the final invalid-response guard was added.
+- [x] Task 10 — Hybrid RAG assistant and Tunisian labour-market intelligence.
+  - [x] Audit the assistant, LM Studio client, database models, profile/job
+    records, and conversation history; retain the existing general-purpose
+    assistant as the primary reasoning engine.
+  - [x] Extend public-data collection with sourced Tunisia labour-market
+    indicators while keeping French observations separate and comparative.
+  - [x] Inventory authoritative Tunisian sources, available application data,
+    source licences, recency, and gaps before adding claims or records.
+  - [x] Design a multilingual document ingestion and PostgreSQL/pgvector
+    retrieval foundation with keyword search, metadata, source citations, and
+    graceful fallback.
+  - [x] Add conditional retrieval and structured application-data queries
+    without requiring RAG for general questions.
+  - [x] Add migration, configuration, ingestion documentation, and tests for
+    retrieval, routing, relevance, failures, and provenance.
+  - [x] Apply the migration and ingest the collected records on an authorized
+    PostgreSQL/pgvector database; verify live vector and full-text queries with
+    the configured multilingual embedding service.
+- [x] Task 11 — Administration and training-provider dashboards.
+  - [x] Add persisted job applications and employer-reported hiring outcomes
+    with candidate/employer role boundaries.
+  - [x] Add provider-owned course metadata, candidate enrollment, provider
+    roster, and completion tracking.
+  - [x] Add filtered aggregate administration indicators for activity, skills,
+    applications, hiring outcomes, and training.
+  - [x] Add role-specific administration and provider dashboards plus
+    candidate/employer supporting screens.
+  - [x] Re-run API (89), migration, frontend UI (32), and production build
+    checks after final dashboard changes.
 - [x] Task 4 — Deterministic career roadmap engine and screens.
   - [x] Generate prioritized steps from missing skills in published offers and
     the candidate’s saved skills.
@@ -80,6 +109,7 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
   - [x] Save raw snapshots, normalized records, source/licence metadata, and
     checksums; report source failures explicitly.
 - [/] Task 2 — Derja chatbot, manual fallback, and session history.
+- [x] Task 10 — Hybrid RAG assistant and Tunisian labour-market intelligence.
 - [x] Task 4 — Deterministic career roadmap engine and screens.
   - [x] Build roadmap steps from profile skill gaps in published job offers,
     prioritizing skills requested by more offers.
@@ -88,6 +118,7 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
 - [ ] Task 9 — Interview preparation and hard/soft skills review.
   - [ ] Help candidates review role-relevant hard skills and soft skills
     before interviews.
+- [x] Task 11 — Administration and training-provider dashboards.
 - [ ] Task 6, part 2 — Polish the remaining screens in the brief's order.
 
 ## Project baseline / guardrails
@@ -99,16 +130,23 @@ Status: `[ ]` todo · `[/]` in progress · `[x]` completed · `[!]` blocked
 - Features not implemented are unavailable; the initial UI uses empty states
   rather than simulated platform data.
 - Latest checks: frontend production build passed; frontend tests passed
-  (29); full API test suite passed (59), including roadmap, permissions, and
-  SQLite migration checks. PostgreSQL-backed verification remains unavailable
-  with the current local connection settings.
+  (32); full API test suite passed (89), including marketplace role/ownership,
+  SQLite migration, roadmap, permissions, and assistant retrieval/routing.
+  The new migration through revision 0007 passed SQLite integration checks
+  and PostgreSQL static SQL generation. PostgreSQL 17 with pgvector was
+  migrated through revision 0006; six approved Tunisia/France documents and
+  361 384-dimensional chunks were ingested. Live PostgreSQL vector,
+  full-text-only, country-filtered, French, and Arabic retrieval checks passed
+  against the local multilingual embedding service.
 - PostgreSQL-backed authentication and role infrastructure are implemented.
   Candidate profiles and employer job offers are persisted; the match score
   is deterministic required-skill overlap. Candidate profile assistance uses
   configured local model services without persisted history; career assistant
   conversations are persisted in candidate-owned sessions. Career roadmaps
   are deterministic skill-gap plans based on published offers, with
-  candidate-owned progress. Applications and courses remain unavailable.
+  candidate-owned progress. Job applications and provider courses,
+  enrollments, and completions are persisted; the administration dashboard
+  reports aggregate data and explicitly employer-reported hiring outcomes.
 - API liveness is process-only; it intentionally does not imply database
   readiness.
 - Live PostgreSQL authentication was rejected by the current local connection

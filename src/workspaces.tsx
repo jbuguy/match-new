@@ -16,12 +16,14 @@ import {
 import { Badge, Button, Card } from "./components/ui";
 import {
   ApiError,
+  applyToJob,
   createCandidateAssistantSession,
   createEmployerOffer,
   deleteCandidateAssistantSession,
   fetchCandidateAssistantSession,
   fetchCandidateAssistantSessions,
   fetchCandidateMatches,
+  fetchCandidateApplications,
   fetchCandidateRoadmap,
   fetchCandidateProfile,
   fetchEmployerOffers,
@@ -821,14 +823,18 @@ export function CandidateMatchesPage({
   onNavigate: (page: string) => void;
 }) {
   const [matches, setMatches] = useState<JobMatch[]>([]);
+  const [appliedOfferIds, setAppliedOfferIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    fetchCandidateMatches(token)
-      .then((results) => {
-        if (!cancelled) setMatches(results);
+    Promise.all([fetchCandidateMatches(token), fetchCandidateApplications(token)])
+      .then(([results, applications]) => {
+        if (!cancelled) {
+          setMatches(results);
+          setAppliedOfferIds(new Set(applications.map((application) => application.job_offer_id)));
+        }
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(errorMessage(cause));
@@ -861,13 +867,49 @@ export function CandidateMatchesPage({
         </Card>
       )}
       <div className="workspace-list">
-        {matches.map((match) => <MatchCard key={match.id} match={match} />)}
+        {matches.map((match) => (
+          <MatchCard
+            key={match.id}
+            match={match}
+            token={token}
+            isApplied={appliedOfferIds.has(match.id)}
+            onApplied={() =>
+              setAppliedOfferIds((current) => new Set([...current, match.id]))
+            }
+          />
+        ))}
       </div>
     </section>
   );
 }
 
-function MatchCard({ match }: { match: JobMatch }) {
+function MatchCard({
+  match,
+  token,
+  isApplied,
+  onApplied,
+}: {
+  match: JobMatch;
+  token: string;
+  isApplied: boolean;
+  onApplied: () => void;
+}) {
+  const [isApplying, setIsApplying] = useState(false);
+  const [error, setError] = useState("");
+
+  async function apply() {
+    setIsApplying(true);
+    setError("");
+    try {
+      await applyToJob(token, match.id);
+      onApplied();
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setIsApplying(false);
+    }
+  }
+
   return (
     <Card className="offer-card">
       <div className="offer-card__top">
@@ -882,6 +924,14 @@ function MatchCard({ match }: { match: JobMatch }) {
       <p className="offer-card__description">{match.description}</p>
       <SkillList label="Compétences correspondantes" skills={match.matched_skills} tone="matched" />
       <SkillList label="À développer" skills={match.missing_skills} tone="missing" />
+      {error && <p className="workspace-error" role="alert">{error}</p>}
+      <Button disabled={isApplied || isApplying} onClick={() => void apply()}>
+        {isApplying
+          ? "Envoi de la candidature…"
+          : isApplied
+            ? "Candidature envoyée"
+            : "Candidater"}
+      </Button>
     </Card>
   );
 }

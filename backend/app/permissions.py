@@ -14,6 +14,10 @@ class Permission(str, Enum):
     OFFER_MANAGE_ORGANISATION = "offer:manage:organisation"
     APPLICATION_MANAGE_ORGANISATION = "application:manage:organisation"
     APPLICANT_READ_BY_APPLICATION = "applicant:read:by_application"
+    COURSE_READ_PUBLISHED = "course:read:published"
+    COURSE_ENROLL = "course:enroll"
+    COURSE_ENROLLMENT_READ_ORGANISATION = "course_enrollment:read:organisation"
+    COURSE_ENROLLMENT_MANAGE_ORGANISATION = "course_enrollment:manage:organisation"
     REFERENTIAL_MANAGE = "referential:manage"
     SUGGESTION_REVIEW = "suggestion:review"
     DATASET_IMPORT = "dataset:import"
@@ -34,6 +38,8 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.CONSENT_MANAGE_OWN,
             Permission.MATCH_READ_OWN,
             Permission.APPLICATION_MANAGE_OWN,
+            Permission.COURSE_READ_PUBLISHED,
+            Permission.COURSE_ENROLL,
             Permission.ROADMAP_MANAGE_OWN,
             Permission.CHAT_MANAGE_OWN,
         }
@@ -55,7 +61,12 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
         }
     ),
     Role.TRAINING_PROVIDER: frozenset(
-        {Permission.COURSE_MANAGE_ORGANISATION, Permission.VALIDATED_SKILL_READ}
+        {
+            Permission.COURSE_MANAGE_ORGANISATION,
+            Permission.COURSE_ENROLLMENT_READ_ORGANISATION,
+            Permission.COURSE_ENROLLMENT_MANAGE_ORGANISATION,
+            Permission.VALIDATED_SKILL_READ,
+        }
     ),
     Role.OPERATOR: frozenset(
         {Permission.SERVICE_CONFIGURE, Permission.JOB_STATUS_READ, Permission.AUDIT_READ}
