@@ -9,6 +9,7 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 *.tsbuildinfo
+backend/data/
 
 .env
 .env.*

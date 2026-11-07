@@ -24,10 +24,19 @@ import {
 } from "lucide-react";
 import { Badge, Button, Card, ProgressBar } from "./components/ui";
 import {
+  CandidateAssistantPage,
+  CandidateMatchesPage,
+  CandidateProfilePage,
+  CandidateRoadmapPage,
+  EmployerOffersPage,
+  RoleAssistant,
+} from "./workspaces";
+import {
   ApiError,
   demoAccounts,
   fetchCurrentUser,
   login,
+  registerCandidate,
   type AuthUser,
   type Role,
 } from "./auth";
@@ -60,6 +69,7 @@ const roleConfiguration: Record<
       { label: "Vue d’ensemble", icon: LayoutDashboard },
       { label: "Mes offres", icon: BriefcaseBusiness },
       { label: "Candidatures", icon: UserRound },
+      { label: "Assistant", icon: MessageCircle },
       { label: "Mon organisation", icon: Building2 },
     ],
     dashboardTitle: "Votre espace employeur",
@@ -122,7 +132,9 @@ export default function App() {
       .then((authenticatedUser) => {
         if (!cancelled) {
           setUser(authenticatedUser);
-          setActivePage(roleConfiguration[authenticatedUser.role].navigation[0].label);
+          if (!user) {
+            setActivePage(roleConfiguration[authenticatedUser.role].navigation[0].label);
+          }
           setIsLoading(false);
         }
       })
@@ -132,7 +144,11 @@ export default function App() {
           sessionStorage.removeItem("mahara-match-token");
           setAccessToken(null);
         }
-        setAuthError(error instanceof Error ? error.message : "La connexion a échoué.");
+        setAuthError(
+          error instanceof ApiError
+            ? error.message
+            : "Impossible de joindre le service. Vérifiez votre connexion.",
+        );
         setIsLoading(false);
       });
 
@@ -141,17 +157,32 @@ export default function App() {
     };
   }, [accessToken]);
 
-  async function handleLogin(event: FormEvent<HTMLFormElement>, email: string, password: string) {
+  async function handleAuthentication(
+    event: FormEvent<HTMLFormElement>,
+    email: string,
+    password: string,
+    isRegistration: boolean,
+  ) {
     event.preventDefault();
     setAuthError("");
     try {
-      const result = await login(email, password);
+      const result = isRegistration
+        ? await registerCandidate(email, password)
+        : await login(email, password);
       sessionStorage.setItem("mahara-match-token", result.access_token);
       setAccessToken(result.access_token);
       setUser(result.user);
-      setActivePage(roleConfiguration[result.user.role].navigation[0].label);
+      setActivePage(
+        isRegistration
+          ? "Mon profil"
+          : roleConfiguration[result.user.role].navigation[0].label,
+      );
     } catch (error: unknown) {
-      setAuthError(error instanceof Error ? error.message : "La connexion a échoué.");
+      setAuthError(
+        error instanceof ApiError
+          ? error.message
+          : "Impossible de joindre le service. Vérifiez votre connexion.",
+      );
     }
   }
 
@@ -173,14 +204,14 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (!user || !accessToken) {
     return (
       <div className="app-shell" data-theme={theme}>
         <LoginPage
           error={authError}
           theme={theme}
           onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
-          onLogin={handleLogin}
+          onAuthenticate={handleAuthentication}
         />
       </div>
     );
@@ -223,6 +254,7 @@ export default function App() {
               className={`nav-item ${activePage === label ? "nav-item--active" : ""}`}
               key={label}
               type="button"
+              aria-label={label}
               aria-current={activePage === label ? "page" : undefined}
               onClick={() => {
                 setActivePage(label);
@@ -320,8 +352,21 @@ export default function App() {
                 title={configuration.dashboardTitle}
                 description={configuration.dashboardDescription}
                 role={configuration.label}
+                onNavigate={setActivePage}
               />
             )
+          ) : isCandidate && activePage === "Mon profil" ? (
+            <CandidateProfilePage token={accessToken} />
+          ) : isCandidate && activePage === "Mes opportunités" ? (
+            <CandidateMatchesPage token={accessToken} onNavigate={setActivePage} />
+          ) : isCandidate && activePage === "Mon parcours" ? (
+            <CandidateRoadmapPage token={accessToken} onNavigate={setActivePage} />
+          ) : isCandidate && activePage === "Assistant" ? (
+            <CandidateAssistantPage token={accessToken} onNavigate={setActivePage} />
+          ) : user.role === "employer" && activePage === "Mes offres" ? (
+            <EmployerOffersPage token={accessToken} />
+          ) : user.role === "employer" && activePage === "Assistant" ? (
+            <RoleAssistant role="employer" onNavigate={setActivePage} />
           ) : (
             <section className="page-placeholder">
               <Badge>En préparation</Badge>
@@ -346,15 +391,21 @@ function LoginPage({
   error,
   theme,
   onToggleTheme,
-  onLogin,
+  onAuthenticate,
 }: {
   error: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
-  onLogin: (event: FormEvent<HTMLFormElement>, email: string, password: string) => Promise<void>;
+  onAuthenticate: (
+    event: FormEvent<HTMLFormElement>,
+    email: string,
+    password: string,
+    isRegistration: boolean,
+  ) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
 
   return (
     <main className="auth-page">
@@ -374,16 +425,22 @@ function LoginPage({
       </div>
       <section className="auth-card" aria-labelledby="login-title">
         <Badge tone="accent">Mahara Match</Badge>
-        <h1 id="login-title">Connectez-vous à votre espace</h1>
-        <p>Chaque compte accède uniquement aux fonctions de son rôle.</p>
+        <h1 id="login-title">
+          {isRegistering ? "Créez votre espace candidat" : "Connectez-vous à votre espace"}
+        </h1>
+        <p>
+          {isRegistering
+            ? "Créez votre compte, puis complétez votre profil avec l’assistant."
+            : "Chaque compte accède uniquement aux fonctions de son rôle."}
+        </p>
         <form
           className="auth-form"
-          onSubmit={(event) => void onLogin(event, email, password)}
+          onSubmit={(event) => void onAuthenticate(event, email, password, isRegistering)}
         >
           <label>
             <span>Adresse e-mail</span>
             <input
-              autoComplete="username"
+              autoComplete={isRegistering ? "email" : "username"}
               type="email"
               required
               value={email}
@@ -393,17 +450,30 @@ function LoginPage({
           <label>
             <span>Mot de passe</span>
             <input
-              autoComplete="current-password"
+              autoComplete={isRegistering ? "new-password" : "current-password"}
               type="password"
               required
+              minLength={isRegistering ? 12 : undefined}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
+          {isRegistering && (
+            <p className="auth-password-hint">Utilisez au moins 12 caractères.</p>
+          )}
           {error && <p className="auth-error" role="alert">{error}</p>}
-          <Button type="submit" className="auth-submit">Se connecter</Button>
+          <Button type="submit" className="auth-submit">
+            {isRegistering ? "Créer mon compte" : "Se connecter"}
+          </Button>
         </form>
-        <div className="demo-account-list">
+        <button
+          className="auth-mode-toggle"
+          type="button"
+          onClick={() => setIsRegistering(!isRegistering)}
+        >
+          {isRegistering ? "J’ai déjà un compte" : "Créer un compte candidat"}
+        </button>
+        {!isRegistering && <div className="demo-account-list">
           <strong>Comptes de démonstration</strong>
           <p>Choisissez un compte pour remplir son adresse e-mail. Le mot de passe est fourni lors du seed local.</p>
           <div className="demo-account-list__buttons">
@@ -417,7 +487,7 @@ function LoginPage({
               </button>
             ))}
           </div>
-        </div>
+        </div>}
       </section>
     </main>
   );
@@ -427,10 +497,12 @@ function RoleDashboard({
   title,
   description,
   role,
+  onNavigate,
 }: {
   title: string;
   description: string;
   role: string;
+  onNavigate: (page: string) => void;
 }) {
   return (
     <section className="role-dashboard">
@@ -438,12 +510,23 @@ function RoleDashboard({
       <h1>{title}</h1>
       <p className="role-dashboard__description">{description}</p>
       <Card className="role-dashboard__empty">
-        <Badge>En préparation</Badge>
-        <h2>Votre espace est prêt à être configuré</h2>
-        <p>
-          Les fonctions de ce rôle ne sont pas encore disponibles. Aucune offre,
-          candidature, formation ou statistique n’est simulée.
-        </p>
+        {role === "Employeur" ? (
+          <>
+            <Badge>Gestion des offres</Badge>
+            <h2>Publiez une offre pour trouver les bons profils</h2>
+            <p>Décrivez le poste et ses compétences clés pour la proposer aux candidats.</p>
+            <Button onClick={() => onNavigate("Mes offres")}>Créer une offre</Button>
+          </>
+        ) : (
+          <>
+            <Badge>En préparation</Badge>
+            <h2>Votre espace est prêt à être configuré</h2>
+            <p>
+              Les fonctions de ce rôle ne sont pas encore disponibles. Aucune offre,
+              candidature, formation ou statistique n’est simulée.
+            </p>
+          </>
+        )}
       </Card>
     </section>
   );
@@ -561,7 +644,7 @@ function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }) {
           </div>
           <Badge tone="accent">À votre rythme</Badge>
           <h3>Besoin d’un coup de main ?</h3>
-          <p>L’assistant sera disponible ici dès que le service sera prêt.</p>
+          <p>Obtenez des conseils pour valoriser vos compétences et mieux explorer les offres.</p>
           <Button
             variant="secondary"
             className="assistant-card__button"

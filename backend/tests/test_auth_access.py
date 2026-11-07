@@ -270,3 +270,7 @@ def test_admin_actions_and_sensitive_reads_are_audited(
         "admin.referential.updated",
     }
     assert "candidate-123" not in response.text
+    assert all(
+        not {"actor_user_id", "resource_id", "details"}.intersection(event)
+        for event in response.json()
+    )

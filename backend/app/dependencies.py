@@ -14,6 +14,7 @@ from app.models import (
     Role,
     User,
 )
+from app.permissions import Permission, has_permission
 from app.security import decode_access_token, role_from_claim
 
 
@@ -76,6 +77,18 @@ def require_role(*roles: Role) -> Callable[..., User]:
         return user
 
     return role_dependency
+
+
+def require_permission(permission: Permission) -> Callable[..., User]:
+    def permission_dependency(user: User = Depends(get_current_user)) -> User:
+        if not has_permission(user.role, permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your role does not have permission for this action.",
+            )
+        return user
+
+    return permission_dependency
 
 
 def assert_resource_owner(

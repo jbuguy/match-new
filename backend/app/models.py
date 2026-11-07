@@ -105,6 +105,88 @@ class OrganisationMembership(Base):
     organisation: Mapped[Organisation] = relationship(back_populates="memberships")
 
 
+class CandidateProfile(Base):
+    __tablename__ = "candidate_profiles"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    skills: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    education: Mapped[str | None] = mapped_column(String(5000), nullable=True)
+    experience: Mapped[str | None] = mapped_column(String(5000), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class CandidateRoadmapStep(Base):
+    __tablename__ = "candidate_roadmap_steps"
+    __table_args__ = (
+        UniqueConstraint("user_id", "skill_key", name="uq_candidate_roadmap_user_skill"),
+        Index("ix_candidate_roadmap_steps_user_id", "user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    skill_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    skill: Mapped[str] = mapped_column(String(60), nullable=False)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class CandidateAssistantSession(Base):
+    __tablename__ = "candidate_assistant_sessions"
+    __table_args__ = (
+        Index("ix_candidate_assistant_sessions_user_updated", "user_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    messages: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class JobOffer(Base):
+    __tablename__ = "job_offers"
+    __table_args__ = (Index("ix_job_offers_employer_created", "employer_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employer_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(String(5000), nullable=False)
+    location: Mapped[str] = mapped_column(String(120), nullable=False)
+    required_skills: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_log"
     __table_args__ = (
